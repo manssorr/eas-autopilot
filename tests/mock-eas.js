@@ -17,6 +17,7 @@ async function step(text, done, ms = 500) {
 
 (async () => {
   console.log('Resolved "preview" environment for the build.');
+  console.log("You've used 42% of your included build credits this billing period.");
   await step('Checking credentials', 'Using remote iOS credentials (Expo server)');
 
   const devices = [{ identifier: newDevice, deviceClass: 'IPHONE', createdAt: '2026-01-02T03:04:05.000Z' }];
@@ -55,6 +56,7 @@ async function step(text, done, ms = 500) {
   }
   await step('Compressing project files', 'Compressed project files');
   await step('Uploading to EAS Build', 'Uploaded to EAS');
+  fs.appendFileSync(resultFile, 'uploaded\n');
   console.log('See logs: https://expo.dev/accounts/example/projects/example/builds/11111111-2222-3333-4444-555555555555');
 })().catch(error => {
   console.error(error);

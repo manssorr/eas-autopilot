@@ -2,13 +2,13 @@
 set -euo pipefail
 export LC_ALL="${LC_ALL:-en_US.UTF-8}"
 
-VERSION="0.6.0"
+VERSION="0.7.0"
 STATE="${EAS_AUTOPILOT_STATE:-$HOME/.local/state/eas-autopilot}"
 TRUST_DAYS=3
 
 usage() {
   cat <<'EOF'
-Usage: eas-autopilot [--dir <expo app dir>] [--profile <name>] [--udid <UDID>] [--wait]
+Usage: eas-autopilot [--dir <expo app dir>] [--profile <name>] [--udid <UDID>] [--wait] [--yes]
        eas-autopilot --history [N]
 
 Runs `eas build --platform ios --profile <name>` with a live progress view,
@@ -18,6 +18,7 @@ answers the routine credential prompts, and stops for you only on a real decisio
   --profile  eas.json build profile (default: preview)
   --udid     after the build finishes, confirm this UDID is in every provisioning profile
   --wait     follow the build until it finishes (implied by --udid)
+  --yes      start the build without the final confirmation
   --history  print the last N runs (default 10)
 
 Run history: ~/.local/state/eas-autopilot/runs.jsonl (one JSON object per run)
@@ -28,12 +29,14 @@ DIR="$PWD"
 PROFILE="preview"
 UDID=""
 WAIT=0
+AUTO_YES=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --dir) DIR="$2"; shift 2 ;;
     --profile) PROFILE="$2"; shift 2 ;;
     --udid) UDID="$2"; WAIT=1; shift 2 ;;
     --wait) WAIT=1; shift ;;
+    --yes) AUTO_YES=1; shift ;;
     --history)
       N="${2:-10}"
       [[ -f "$STATE/runs.jsonl" ]] || { echo "No runs yet."; exit 0; }
@@ -251,6 +254,12 @@ set ::last_sub ""
 set ::trust_days $env(EAS_TRUST_DAYS)
 set ::udid $env(EAS_TARGET_UDID)
 set ::failed {}
+set ::all_failed {}
+set ::selected {}
+set ::target ""
+set ::credit_note ""
+set ::confirmed 0
+set ::auto_yes $env(EAS_AUTO_YES)
 
 proc emit {kind text} {
   set f [open $::env(EAS_EVENTS) a]
@@ -410,6 +419,7 @@ proc select_all_devices {q} {
     if {$off == 0 && $on > 0} {
       send "\r"
       expect -timeout 60 -re {([0-9]+) devices? selected} {
+        lappend ::selected "$::target $expect_out(1,string)"
         emit done "📱 Selected all $expect_out(1,string) registered devices"
         return
       } timeout {
@@ -449,7 +459,7 @@ proc decide_unprovisioned {q} {
     if {$k eq "\r" || $k eq "n" || $k eq "N"} {
       send_user "✓ stopping\n"
       emit decision "stopped: $::udid not provisioned at Apple"
-      set f [open $::env(EAS_EVENTS) a]; fconfigure $f -encoding iso8859-1; puts $f "stopped|[clock seconds]|unprovisioned"; close $f
+      mark_stopped unprovisioned
       send "\x1b\[B"
       after 300
       send "\r"
@@ -465,6 +475,64 @@ proc decide_unprovisioned {q} {
       return
     }
     if {$k eq "\x03"} { exit 130 }
+  }
+}
+
+proc mark_stopped {why} {
+  set f [open $::env(EAS_EVENTS) a]
+  fconfigure $f -encoding iso8859-1
+  puts $f "stopped|[clock seconds]|$why"
+  close $f
+}
+
+proc confirm_build {} {
+  if {$::confirmed} { return }
+  set ::confirmed 1
+  if {$::auto_yes} {
+    emit decision "auto: start build (--yes)"
+    return
+  }
+  set pgid [exp_pid]
+  catch {exec kill -STOP -$pgid}
+  pause_ui
+  send_user "\n  \033\[1;36m🧾 Ready to build\033\[0m \033\[2m(EAS is paused, nothing uploaded, no build created yet)\033\[0m\n"
+  send_user "  profile \033\[1m$::env(EAS_PROFILE)\033\[0m · $::env(EAS_GIT)\n"
+  if {[llength $::selected] > 0} {
+    send_user "  devices per target:\n"
+    foreach t $::selected { send_user "    - [lindex $t 0]: [lindex $t 1]\n" }
+  } else {
+    send_user "  devices: existing profiles reused, no change\n"
+  }
+  if {[llength $::all_failed] > 0} {
+    send_user "  \033\[33m⚠ Apple refused [llength $::all_failed] device(s), they will not be able to install this build\033\[0m\n"
+  }
+  if {$::udid ne ""} {
+    if {[lsearch -glob $::all_failed "$::udid*"] >= 0} {
+      send_user "  \033\[31m✘ $::udid is NOT in this build\033\[0m\n"
+    } else {
+      send_user "  \033\[32m✔\033\[0m $::udid was not refused by Apple\n"
+    }
+  }
+  if {$::credit_note ne ""} { send_user "  💳 $::credit_note\n" }
+  send_user "  \033\[1mEnter/y\033\[0m start the build   \033\[1mn\033\[0m cancel, nothing is built\n  "
+  while 1 {
+    set k [read_key]
+    if {$k eq "\r" || $k eq "y" || $k eq "Y"} {
+      send_user "✓ starting\n"
+      emit decision "confirmed: start build"
+      catch {exec kill -CONT -$pgid}
+      resume_ui
+      return
+    }
+    if {$k eq "n" || $k eq "N" || $k eq "\x03"} {
+      send_user "✓ cancelled\n"
+      emit decision "cancelled before upload"
+      mark_stopped cancelled
+      catch {exec kill -CONT -$pgid}
+      catch {exec kill -INT -$pgid}
+      expect -timeout 15 eof {} timeout { catch {exec kill -KILL -$pgid} }
+      exit 4
+    }
   }
 }
 
@@ -503,16 +571,24 @@ expect {
     handle_prompt $q $rest
     exp_continue
   }
+  -re {Compressing project files} { confirm_build; emit phase "🗜️  Compressing project"; exp_continue }
+  -re {Uploading to EAS Build} { confirm_build; emit phase "☁️  Uploading to EAS"; exp_continue }
   -re {Failed to provision ([0-9]+) of the selected devices:(.*?)Most commonly} {
     set ::failed {}
     foreach l [split [clean $expect_out(2,string)] "\n"] {
       set l [string trim $l]
-      if {[string match "- *" $l]} { lappend ::failed [string range $l 2 end] }
+      if {[string match "- *" $l]} {
+        set d [string range $l 2 end]
+        lappend ::failed $d
+        if {[lsearch -exact $::all_failed $d] < 0} { lappend ::all_failed $d }
+      }
     }
     exp_continue
   }
   -re {Resolved "([^"]+)" environment} { emit done "🌱 Loaded [string trim [clean $expect_out(1,string)]] environment"; emit phase "🔐 Loading Apple credentials"; exp_continue }
+  -re {You've used ([0-9]+%) of your included build credits} { set ::credit_note "$expect_out(1,string) of included build credits used this period"; exp_continue }
   -re {Setting up credentials for target ([^\r\n]+)} {
+    set ::target [lindex [string trim [clean $expect_out(1,string)]] 0]
     emit phase "🎯 Credentials for [string trim [clean $expect_out(1,string)]]"
     exp_continue
   }
@@ -531,8 +607,6 @@ expect {
     if {$t ne $::last_sub} { set ::last_sub $t; emit sub $t }
     exp_continue
   }
-  -re {Compressing project files} { emit phase "🗜️  Compressing project"; exp_continue }
-  -re {Uploading to EAS Build} { emit phase "☁️  Uploading to EAS"; exp_continue }
   -re {(https://expo\.dev/accounts/[^ \r\n\x1b]+/builds/[0-9a-f-]+)} {
     set f [open $::env(EAS_URL_FILE) w]
     puts $f $expect_out(1,string)
@@ -549,9 +623,14 @@ EXPECT
 
 set +e
 EAS_DIR="$DIR" EAS_LOG="$LOG" EAS_EVENTS="$EVENTS" EAS_URL_FILE="$URL_FILE" EAS_CMD="$EAS_CMD" \
-  EAS_TRUST_FILE="$STATE/trust.tsv" EAS_TRUST_DAYS="$TRUST_DAYS" EAS_TARGET_UDID="$UDID" expect -c "encoding system iso8859-1; source -encoding iso8859-1 {$EXP}"
+  EAS_TRUST_FILE="$STATE/trust.tsv" EAS_TRUST_DAYS="$TRUST_DAYS" EAS_TARGET_UDID="$UDID" EAS_AUTO_YES="$AUTO_YES" EAS_PROFILE="$PROFILE" EAS_GIT="$GIT_BRANCH @ $GIT_SHA" expect -c "encoding system iso8859-1; source -encoding iso8859-1 {$EXP}"
 EXPECT_CODE=$?
 set -e
+if grep -q '^stopped|.*|cancelled$' "$EVENTS"; then
+  RESULT="cancelled"
+  fail "Cancelled before upload. No build was created."
+  exit 4
+fi
 if grep -q '^stopped|.*|unprovisioned$' "$EVENTS"; then
   RESULT="device-not-provisioned-at-apple"
   fail "Stopped before building: Apple has not accepted $UDID yet. Check its status at https://developer.apple.com/account/resources/devices/list and run again once it is Enabled."

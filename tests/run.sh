@@ -37,7 +37,7 @@ run_case() {
   export EAS_MOCK_RESULT="$WORK/result-$1"
   : > "$EAS_MOCK_RESULT"
   set +e
-  EAS_MOCK_FAIL="$2" APPLE_ID_KEY="$3" expect "$HERE/drive.exp" > "$WORK/out-$1" 2>&1
+  EAS_MOCK_FAIL="$2" APPLE_ID_KEY="$3" CONFIRM_KEY="${4:-y}" expect "$HERE/drive.exp" > "$WORK/out-$1" 2>&1
   CODE=$?
   set -e
 }
@@ -46,6 +46,8 @@ echo "Case 1: first run, trust the Apple ID, every device selected"
 run_case first 0 t
 check "exit code" "$CODE" 0
 check "all devices selected on every target" "$(grep -c 'selected .* 20/20' "$EAS_MOCK_RESULT")" 3
+check "uploaded after confirmation" "$(grep -c '^uploaded' "$EAS_MOCK_RESULT")" 1
+check "summary shown" "$(grep -c 'Ready to build' "$WORK/out-first")" 1
 check "result" "$(jq -r .result "$(last_meta)")" queued
 check "trust saved" "$(cut -f1 "$EAS_AUTOPILOT_STATE/trust.tsv")" tester@example.com
 
@@ -60,8 +62,15 @@ check "exit code" "$CODE" 3
 check "EAS answered No" "$(grep '^continue' "$EAS_MOCK_RESULT")" "continue false"
 check "result" "$(jq -r .result "$(last_meta)")" device-not-provisioned-at-apple
 
-echo "Case 4: history is valid UTF-8 JSON lines"
-check "runs recorded" "$(wc -l < "$EAS_AUTOPILOT_STATE/runs.jsonl" | tr -d ' ')" 3
+echo "Case 4: answer n at the confirmation, nothing is uploaded"
+run_case cancel 0 x n
+check "exit code" "$CODE" 4
+check "nothing uploaded" "$(grep -c '^uploaded' "$EAS_MOCK_RESULT" || true)" 0
+check "no build link" "$(jq -r .build.url "$(last_meta)")" null
+check "result" "$(jq -r .result "$(last_meta)")" cancelled
+
+echo "Case 5: history is valid UTF-8 JSON lines"
+check "runs recorded" "$(wc -l < "$EAS_AUTOPILOT_STATE/runs.jsonl" | tr -d ' ')" 4
 check "utf-8" "$(python3 -c "open('$EAS_AUTOPILOT_STATE/runs.jsonl',encoding='utf-8').read(); print('ok')")" ok
 
 echo

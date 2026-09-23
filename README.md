@@ -7,7 +7,7 @@ It was built for the everyday case of adding a tester's iPhone to an internal (a
 register the device, rebuild, and make sure the new provisioning profile actually contains it.
 
 ```
-  📦 EAS iOS preview build eas-autopilot v0.6.0
+  📦 EAS iOS preview build eas-autopilot v0.7.0
 
   ✔ 🧹 Working tree clean 0s
   ✔ 🌱 Loaded preview environment 2s
@@ -40,6 +40,7 @@ eas-autopilot --dir path/to/expo-app --udid <new device UDID>
 | `--profile` | `eas.json` build profile (default: `preview`) |
 | `--udid` | After the build finishes, download the IPA and confirm this device is in every provisioning profile. Implies `--wait`. |
 | `--wait` | Follow the build until EAS finishes it |
+| `--yes` | Start the build without the final confirmation |
 | `--history [N]` | Print the last N runs |
 
 ## What it answers for you
@@ -51,6 +52,25 @@ eas-autopilot --dir path/to/expo-app --udid <new device UDID>
 | Select devices for the ad hoc build | selects **every** registered device, and submits only after it has checked the list shows all of them selected |
 | Reuse the profile? | yes |
 | Continue without devices Apple refused? | yes, **unless** the refused list contains your `--udid` |
+
+## Nothing is built until you confirm
+
+EAS asks no question between setting up credentials and uploading the source, and a build exists
+only once the upload finishes. When EAS starts compressing the project, `eas-autopilot` pauses the
+EAS process group (`SIGSTOP`) and shows a summary:
+
+```
+  🧾 Ready to build (EAS is paused, nothing uploaded, no build created yet)
+  profile preview · main @ 1a2b3c4
+  devices per target:
+    - App: 55
+    - Widget: 55
+  ✔ 00008000-0000000000000000 was not refused by Apple
+  💳 42% of included build credits used this period
+  Enter/y start the build   n cancel, nothing is built
+```
+
+Enter resumes EAS. `n` interrupts it, and no build is created. Pass `--yes` to skip this step.
 
 ## When it stops for you
 
