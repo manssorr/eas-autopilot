@@ -1,0 +1,631 @@
+#!/usr/bin/env bash
+set -euo pipefail
+export LC_ALL="${LC_ALL:-en_US.UTF-8}"
+
+VERSION="0.6.0"
+STATE="${EAS_AUTOPILOT_STATE:-$HOME/.local/state/eas-autopilot}"
+TRUST_DAYS=3
+
+usage() {
+  cat <<'EOF'
+Usage: eas-autopilot [--dir <expo app dir>] [--profile <name>] [--udid <UDID>] [--wait]
+       eas-autopilot --history [N]
+
+Runs `eas build --platform ios --profile <name>` with a live progress view,
+answers the routine credential prompts, and stops for you only on a real decision.
+
+  --dir      Expo app directory to build from (default: current directory)
+  --profile  eas.json build profile (default: preview)
+  --udid     after the build finishes, confirm this UDID is in every provisioning profile
+  --wait     follow the build until it finishes (implied by --udid)
+  --history  print the last N runs (default 10)
+
+Run history: ~/.local/state/eas-autopilot/runs.jsonl (one JSON object per run)
+EOF
+}
+
+DIR="$PWD"
+PROFILE="preview"
+UDID=""
+WAIT=0
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --dir) DIR="$2"; shift 2 ;;
+    --profile) PROFILE="$2"; shift 2 ;;
+    --udid) UDID="$2"; WAIT=1; shift 2 ;;
+    --wait) WAIT=1; shift ;;
+    --history)
+      N="${2:-10}"
+      [[ -f "$STATE/runs.jsonl" ]] || { echo "No runs yet."; exit 0; }
+      tail -n "$N" "$STATE/runs.jsonl" | jq -r '"\(.started_at)  v\(.tool_version)  \(.result)  \(.duration_s)s  \(.git.sha)  \(.build.url // "-")"'
+      exit 0 ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "Unknown option: $1" >&2; usage; exit 2 ;;
+  esac
+done
+
+[[ -f "$DIR/app.config.ts" || -f "$DIR/app.json" ]] || { echo "✗ $DIR is not an Expo app directory" >&2; exit 2; }
+DIR="$(cd "$DIR" && pwd)"
+
+RUN_ID="$(date +%Y%m%d-%H%M%S)-$$"
+WORK="$STATE/runs/$RUN_ID"
+mkdir -p "$WORK"
+touch "$STATE/trust.tsv"
+LOG="$WORK/eas.log"
+EXP="$WORK/build.exp"
+EVENTS="$WORK/events"
+URL_FILE="$WORK/url"
+STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+START_EPOCH="$(date +%s)"
+RESULT="aborted"
+BUILD_STATUS=""
+UDID_CHECK=""
+URL=""
+BUILD_ID=""
+TYPICAL_BUILD=""
+: > "$EVENTS"
+
+emit() { printf '%s|%s|%s\n' "$1" "$(date +%s)" "${2:-}" >> "$EVENTS"; }
+
+explain() {
+  case "$1" in
+    *"Waking up"*) echo "npx is starting eas-cli and evaluating app.config.ts" ;;
+    *"Fetching Apple devices"*) echo "Apple's developer API lists every registered device, it is often slow" ;;
+    *"provisioning profile"*|*"ad hoc"*) echo "Apple is rebuilding the profile with the new device list, 10-60 s per target" ;;
+    *"Loading Apple credentials"*|*"Checking iOS credentials"*) echo "EAS is reading the stored certificate and profiles from its server" ;;
+    *"Credentials for"*) echo "every app target and extension needs its own provisioning profile" ;;
+    *"Selecting"*) echo "checking every device shows as selected before submitting" ;;
+    *"Compressing"*) echo "packing the monorepo source for upload" ;;
+    *"Uploading"*) echo "sending the source archive to EAS" ;;
+    *"queue"*) echo "waiting for a free EAS macOS worker, depends on EAS load" ;;
+    *"Building"*) echo "EAS installs pods, then Xcode compiles and archives${TYPICAL_BUILD:+, last build took $TYPICAL_BUILD}" ;;
+    *"Downloading"*) echo "fetching the IPA to read its provisioning profiles" ;;
+    *) echo "" ;;
+  esac
+}
+
+fmt_dur() { local s=$1; if (( s >= 60 )); then printf '%dm%02ds' $((s / 60)) $((s % 60)); else printf '%ds' "$s"; fi; }
+
+render() {
+  local frames=("⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏")
+  local jokes=("☕ good time for a coffee" "🐢 Xcode is thinking very hard" "🧙 signing things with magic" "🦖 compiling since the Jurassic" "🎧 put on a song" "🍕 pizza would be ready by now")
+  local phase="🚀 Waking up EAS" sub="" paused=0 seen=0 i=0 now line kind ts text last_done="" mark step_start cols
+  mark=$(date +%s); step_start=$mark
+  cols=$(tput cols 2>/dev/null || echo 100)
+  while :; do
+    local total
+    total=$(wc -l < "$EVENTS" | tr -d ' ')
+    while (( seen < total )); do
+      seen=$((seen + 1))
+      line=$(sed -n "${seen}p" "$EVENTS")
+      kind="${line%%|*}"; line="${line#*|}"
+      ts="${line%%|*}"; text="${line#*|}"
+      case "$kind" in
+        phase) if [[ "$text" != "$phase" ]]; then phase="$text"; sub=""; step_start=$ts; fi ;;
+        sub) sub="$text"; step_start=$ts ;;
+        done)
+          if [[ "$text" != "$last_done" ]]; then
+            printf '\r\033[K  \033[32m✔\033[0m %s \033[2m%s\033[0m\n' "$text" "$(fmt_dur $((ts - mark)))"
+            last_done="$text"; mark=$ts
+          fi ;;
+        warn) printf '\r\033[K  \033[33m⚠\033[0m %s\n' "$text"; mark=$ts ;;
+        pause) paused=1; printf '\r\033[K' ;;
+        resume) paused=0; mark=$ts ;;
+        stop) printf '\r\033[K'; return 0 ;;
+      esac
+    done
+    if (( paused == 0 )); then
+      now=$(date +%s)
+      local in_step=$((now - step_start)) label="$phase" hint=""
+      [[ -n "$sub" ]] && label="$phase · $sub"
+      if (( in_step >= 10 )); then hint="$(explain "$label")"; fi
+      if [[ "$phase" == *"Building"* || "$phase" == *"queue"* ]] && (( in_step > 30 )) && (( (now / 15) % 2 == 0 )); then
+        hint="${jokes[$(( (now / 30) % ${#jokes[@]} ))]}"
+      fi
+      local head="$label $(fmt_dur $in_step)" tail=""
+      [[ -n "$hint" ]] && tail=" — $hint"
+      local max=$((cols - 8))
+      if (( ${#head} + ${#tail} > max )); then
+        local room=$((max - ${#head}))
+        if (( room > 4 )); then tail="${tail:0:room}…"; else tail=""; head="${head:0:max}"; fi
+      fi
+      printf '\r\033[K  \033[36m%s\033[0m %s\033[2m%s\033[0m' "${frames[$((i % 10))]}" "$head" "$tail"
+      i=$((i + 1))
+    fi
+    sleep 0.1
+  done
+}
+
+write_history() {
+  local code=$1
+  RUN_ID="$RUN_ID" VERSION="$VERSION" TOOL_PATH="$0" EAS_CLI_VERSION="${EAS_CLI_VERSION:-unknown}" \
+  STARTED_AT="$STARTED_AT" DURATION="$(( $(date +%s) - START_EPOCH ))" CODE="$code" RESULT="$RESULT" \
+  DIR="$DIR" GIT_BRANCH="${GIT_BRANCH:-}" GIT_SHA="${GIT_SHA:-}" BUILD_ID="$BUILD_ID" URL="$URL" \
+  BUILD_STATUS="$BUILD_STATUS" UDID="$UDID" UDID_CHECK="$UDID_CHECK" PROFILE="$PROFILE" \
+  python3 - "$EVENTS" "$WORK/meta.json" "$STATE/runs.jsonl" <<'PY' || true
+import json, os, sys
+events_path, meta_path, runs_path = sys.argv[1:]
+env = os.environ
+steps, decisions, warnings = [], [], []
+prev = None
+for raw in open(events_path, encoding="utf-8"):
+    parts = raw.rstrip("\n").split("|", 2)
+    if len(parts) < 3:
+        continue
+    kind, ts, text = parts[0], int(parts[1]), parts[2]
+    if prev is None:
+        prev = ts
+    if kind == "done":
+        steps.append({"step": text, "seconds": ts - prev})
+        prev = ts
+    elif kind == "decision":
+        decisions.append(text)
+    elif kind == "warn":
+        warnings.append(text)
+        prev = ts
+    elif kind == "resume":
+        prev = ts
+meta = {
+    "run_id": env["RUN_ID"],
+    "tool": "eas-autopilot",
+    "profile": env["PROFILE"],
+    "tool_version": env["VERSION"],
+    "tool_path": env["TOOL_PATH"],
+    "eas_cli_version": env["EAS_CLI_VERSION"],
+    "started_at": env["STARTED_AT"],
+    "duration_s": int(env["DURATION"]),
+    "exit_code": int(env["CODE"]),
+    "result": env["RESULT"],
+    "dir": env["DIR"],
+    "git": {"branch": env["GIT_BRANCH"], "sha": env["GIT_SHA"]},
+    "build": {"id": env["BUILD_ID"] or None, "url": env["URL"] or None, "status": env["BUILD_STATUS"] or None},
+    "udid": env["UDID"] or None,
+    "udid_check": env["UDID_CHECK"] or None,
+    "decisions": decisions,
+    "warnings": warnings,
+    "steps": steps,
+    "run_dir": os.path.dirname(meta_path),
+}
+with open(meta_path, "w", encoding="utf-8") as f:
+    json.dump(meta, f, indent=2, ensure_ascii=False)
+with open(runs_path, "a", encoding="utf-8") as f:
+    f.write(json.dumps(meta, ensure_ascii=False) + "\n")
+PY
+}
+
+RENDER_PID=""
+cleanup() {
+  local code=$?
+  if [[ -n "$RENDER_PID" ]]; then emit stop; wait "$RENDER_PID" 2>/dev/null || true; fi
+  printf '\033[?25h'
+  stty echo 2>/dev/null || true
+  write_history "$code"
+  printf '  \033[2m🗂  run saved: %s\033[0m\n' "$WORK/meta.json"
+}
+trap cleanup EXIT
+
+stop_render() { emit stop; wait "$RENDER_PID" 2>/dev/null || true; RENDER_PID=""; }
+fail() { if [[ -n "$RENDER_PID" ]]; then stop_render; fi; printf '\033[1;31m✗\033[0m %s\n' "$*" >&2; }
+
+GIT_BRANCH="$(git -C "$DIR" rev-parse --abbrev-ref HEAD)"
+GIT_SHA="$(git -C "$DIR" rev-parse --short HEAD)"
+EAS_CMD="${EAS_AUTOPILOT_CMD:-npx eas-cli build --platform ios --profile $PROFILE --no-wait}"
+if [[ -n "${EAS_AUTOPILOT_CMD:-}" ]]; then
+  WAIT=0
+else
+  EAS_CLI_VERSION="$(cd "$DIR" && npx eas-cli --version 2>/dev/null | awk '{print $1}')"
+  TYPICAL_SECS="$(cd "$DIR" && npx eas-cli build:list --platform ios --buildProfile "$PROFILE" --status finished --limit 1 --json --non-interactive 2>/dev/null | jq -r '.[0].metrics.buildDuration // empty' || true)"
+  if [[ -n "$TYPICAL_SECS" ]]; then TYPICAL_BUILD="$(fmt_dur $((TYPICAL_SECS / 1000)))"; fi
+fi
+
+printf '\n  \033[1m📦 EAS iOS %s build\033[0m \033[2meas-autopilot v%s\033[0m\n' "$PROFILE" "$VERSION"
+printf '  \033[2m%s @ %s · %s\033[0m\n' "$GIT_BRANCH" "$GIT_SHA" "${EAS_CLI_VERSION:-mock}"
+printf '  \033[2mlog: %s\033[0m\n\n' "$LOG"
+
+ROOT="$(git -C "$DIR" rev-parse --show-toplevel)"
+if [[ -n "$(git -C "$ROOT" status --porcelain)" ]]; then
+  if [[ -z "$(git -C "$ROOT" ls-files --others --exclude-standard)" && -z "$(git -C "$ROOT" diff -w --ignore-blank-lines --ignore-space-at-eol)" ]]; then
+    git -C "$ROOT" diff --name-only | sed 's/^/  ↺ whitespace-only, restored: /'
+    git -C "$ROOT" restore .
+  else
+    RESULT="dirty-tree"
+    fail "Working tree has real changes. Commit or discard these first:"
+    git -C "$ROOT" status --short >&2
+    exit 1
+  fi
+fi
+
+printf '\033[?25l'
+render &
+RENDER_PID=$!
+emit done "🧹 Working tree clean"
+
+cat > "$EXP" <<'EXPECT'
+set timeout 1800
+log_user 0
+set lf [open $env(EAS_LOG) w]
+fconfigure $lf -translation binary -buffering line
+log_file -open $lf
+match_max 200000
+set ::last_sub ""
+set ::trust_days $env(EAS_TRUST_DAYS)
+set ::udid $env(EAS_TARGET_UDID)
+set ::failed {}
+
+proc emit {kind text} {
+  set f [open $::env(EAS_EVENTS) a]
+  fconfigure $f -encoding iso8859-1
+  puts $f "$kind|[clock seconds]|$text"
+  close $f
+}
+
+proc clean {s} {
+  regsub -all {\x1b\[[0-9;?]*[a-zA-Z]} $s {} s
+  regsub -all {\x1b[78]} $s {} s
+  regsub -all {\x07} $s {} s
+  return $s
+}
+
+proc drain_stdin {} {
+  fconfigure stdin -blocking 0
+  catch {read stdin}
+  fconfigure stdin -blocking 1
+}
+
+proc wait_answered {q} {
+  regsub -all {[][\\.*+?^$(){}|]} $q {\\&} qe
+  expect -timeout 120 -re "(✔|✖)\[^\r\n\]*$qe\[^\r\n\]*" {} timeout {}
+}
+
+proc pause_ui {} {
+  emit pause ""
+  after 250
+  drain_stdin
+  send_user "\033\[?25h"
+}
+
+proc resume_ui {} {
+  send_user "\033\[?25l"
+  emit resume ""
+}
+
+proc read_key {} {
+  stty raw -echo
+  expect_user -timeout -1 -re {.}
+  set k $expect_out(0,string)
+  stty -raw -echo
+  return $k
+}
+
+proc ask_user {q why} {
+  pause_ui
+  emit decision "$why ($q)"
+  send_user "\n  \033\[1;33m🙋 DECISION NEEDED:\033\[0m $why\n"
+  send_user "  \033\[1mEAS asks:\033\[0m $q\n"
+  send_user "  \033\[2mtype your answer, automation resumes after Enter\033\[0m\n  "
+  stty echo
+  log_user 1
+  interact "\r" { send "\r"; return }
+  log_user 0
+  stty -echo
+  wait_answered $q
+  emit done "🙌 Got your answer, carrying on"
+  resume_ui
+}
+
+proc trust_lookup {email} {
+  set f [open $::env(EAS_TRUST_FILE) r]
+  fconfigure $f -encoding iso8859-1
+  set rows [split [read $f] "\n"]
+  close $f
+  foreach r $rows {
+    lassign [split $r "\t"] e approvals until
+    if {$e eq $email} { return [list $approvals $until] }
+  }
+  return [list 0 0]
+}
+
+proc trust_save {email approvals until} {
+  set f [open $::env(EAS_TRUST_FILE) r]
+  fconfigure $f -encoding iso8859-1
+  set rows [split [string trim [read $f]] "\n"]
+  close $f
+  set out {}
+  foreach r $rows { if {$r ne "" && [lindex [split $r "\t"] 0] ne $email} { lappend out $r } }
+  lappend out "$email\t$approvals\t$until"
+  set f [open $::env(EAS_TRUST_FILE) w]
+  fconfigure $f -encoding iso8859-1
+  puts $f [join $out "\n"]
+  close $f
+}
+
+proc accept_apple_id {q label} {
+  emit done $label
+  send "\r"
+  wait_answered $q
+}
+
+proc confirm_apple_id {q email} {
+  lassign [trust_lookup $email] approvals until
+  set now [clock seconds]
+  if {$until > $now} {
+    set left [expr {($until - $now) / 3600}]
+    accept_apple_id $q "🍏 Apple ID $email (trusted, ${left}h left)"
+    return
+  }
+  pause_ui
+  send_user "\n  \033\[1;33m🍏 Apple ID:\033\[0m \033\[1m$email\033\[0m"
+  if {$approvals > 0} { send_user " \033\[2m(approved $approvals time(s) before)\033\[0m" }
+  send_user "\n  \033\[1mEnter\033\[0m use it   \033\[1mt\033\[0m use it and trust for $::trust_days days   \033\[1mn\033\[0m type another\n  "
+  while 1 {
+    set k [read_key]
+    if {$k eq "\r" || $k eq "y" || $k eq "Y"} {
+      trust_save $email [expr {$approvals + 1}] 0
+      send_user "✓\n"
+      emit decision "Apple ID $email approved"
+      resume_ui
+      accept_apple_id $q "🍏 Apple ID $email"
+      return
+    }
+    if {$k eq "t" || $k eq "T"} {
+      set until [expr {[clock seconds] + $::trust_days * 86400}]
+      trust_save $email [expr {$approvals + 1}] $until
+      send_user "✓ trusted until [clock format $until -format {%a %d %b %H:%M}]\n"
+      emit decision "Apple ID $email trusted for $::trust_days days"
+      resume_ui
+      accept_apple_id $q "🍏 Apple ID $email (trusted $::trust_days days)"
+      return
+    }
+    if {$k eq "n" || $k eq "N"} {
+      send_user "\n  \033\[2mdelete the saved address, type yours, press Enter\033\[0m\n  "
+      emit decision "Apple ID: typed another"
+      stty echo
+      log_user 1
+      interact "\r" { send "\r"; return }
+      log_user 0
+      stty -echo
+      wait_answered $q
+      resume_ui
+      return
+    }
+    if {$k eq "\x03"} { exit 130 }
+  }
+}
+
+proc read_render {} {
+  after 800
+  set render ""
+  expect -timeout 2 -re {.+} { set render [clean $expect_out(buffer)] }
+  set at [string last "Space to select" $render]
+  if {$at >= 0} { set render [string range $render $at end] }
+  return $render
+}
+
+proc select_all_devices {q} {
+  emit phase "📱 Selecting every registered device"
+  set render [read_render]
+  for {set i 0} {$i < 4} {incr i} {
+    set off [regexp -all {◯} $render]
+    set on [regexp -all {◉} $render]
+    if {$off == 0 && $on > 0} {
+      send "\r"
+      expect -timeout 60 -re {([0-9]+) devices? selected} {
+        emit done "📱 Selected all $expect_out(1,string) registered devices"
+        return
+      } timeout {
+        emit warn "📱 EAS did not confirm the selection"
+        ask_user $q "EAS did not confirm the device selection"
+        return
+      }
+    }
+    send "a"
+    set render [read_render]
+  }
+  ask_user $q "could not confirm every device is selected: press a until all show ◉, then Enter"
+}
+
+proc decide_unprovisioned {q} {
+  set n [llength $::failed]
+  set mine [expr {$::udid ne "" && [lsearch -glob $::failed "$::udid*"] >= 0}]
+  if {$n == 0} {
+    ask_user $q "Apple refused some devices but the script could not read which ones"
+    return
+  }
+  if {!$mine} {
+    emit warn "🍎 Apple has not accepted $n device(s) yet, continuing without them"
+    emit decision "auto: continue without $n unprovisioned device(s)"
+    send "\r"
+    wait_answered $q
+    return
+  }
+  pause_ui
+  send_user "\n  \033\[1;33m🙋 DECISION NEEDED:\033\[0m Apple has not accepted \033\[1m$::udid\033\[0m yet\n"
+  send_user "  \033\[2mApple did not provision $n device(s):\033\[0m\n"
+  foreach d $::failed { send_user "    - $d\n" }
+  send_user "  \033\[2mA new device can stay in Processing at Apple for up to 72 h. Building now leaves it out and still uses a build credit.\033\[0m\n"
+  send_user "  \033\[1mEnter/n\033\[0m stop, no build (recommended)   \033\[1my\033\[0m build anyway without it\n  "
+  while 1 {
+    set k [read_key]
+    if {$k eq "\r" || $k eq "n" || $k eq "N"} {
+      send_user "✓ stopping\n"
+      emit decision "stopped: $::udid not provisioned at Apple"
+      set f [open $::env(EAS_EVENTS) a]; fconfigure $f -encoding iso8859-1; puts $f "stopped|[clock seconds]|unprovisioned"; close $f
+      send "\x1b\[B"
+      after 300
+      send "\r"
+      expect -timeout 30 eof {}
+      exit 3
+    }
+    if {$k eq "y" || $k eq "Y"} {
+      send_user "✓ building without it\n"
+      emit decision "build anyway without $::udid"
+      resume_ui
+      send "\r"
+      wait_answered $q
+      return
+    }
+    if {$k eq "\x03"} { exit 130 }
+  }
+}
+
+proc handle_prompt {q rest} {
+  switch -regexp -- $q {
+    {^Do you want to log in to your Apple account\?} {
+      emit done "🍏 Apple login: yes"; send "y\r"; wait_answered $q
+    }
+    {^Apple ID:} {
+      if {[regexp {([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+)} $rest -> email]} { confirm_apple_id $q $email } else { ask_user $q "Apple ID needed" }
+    }
+    {[Pp]assword} { ask_user $q "Apple password needed" }
+    {(code|two-factor|2FA)} { ask_user $q "Apple 2FA code needed" }
+    {^Would you like to choose the devices to provision again\?} {
+      emit done "🔍 Profile is missing devices, choosing again"; send "y\r"; wait_answered $q
+    }
+    {^Select devices for the ad hoc build} { select_all_devices $q }
+    {^Do you want to continue without provisioning these devices\?} { decide_unprovisioned $q }
+    {[Ww]ould you like to reuse the (original )?profile\?} {
+      emit done "♻️  Profile already has every device, reusing it"; send "y\r"; wait_answered $q
+    }
+    default { ask_user $q "EAS asked something the script does not know" }
+  }
+}
+
+emit phase "🚀 Waking up EAS"
+cd $env(EAS_DIR)
+eval spawn $env(EAS_CMD)
+stty -echo
+
+set qpat {\x1b\[36m\?\x1b\[39m \x1b\[1m([^\x1b]+)\x1b\[22m([^\r\n]*)}
+expect {
+  -re $qpat {
+    set q [string trim $expect_out(1,string)]
+    set rest [clean $expect_out(2,string)]
+    handle_prompt $q $rest
+    exp_continue
+  }
+  -re {Failed to provision ([0-9]+) of the selected devices:(.*?)Most commonly} {
+    set ::failed {}
+    foreach l [split [clean $expect_out(2,string)] "\n"] {
+      set l [string trim $l]
+      if {[string match "- *" $l]} { lappend ::failed [string range $l 2 end] }
+    }
+    exp_continue
+  }
+  -re {Resolved "([^"]+)" environment} { emit done "🌱 Loaded [string trim [clean $expect_out(1,string)]] environment"; emit phase "🔐 Loading Apple credentials"; exp_continue }
+  -re {Setting up credentials for target ([^\r\n]+)} {
+    emit phase "🎯 Credentials for [string trim [clean $expect_out(1,string)]]"
+    exp_continue
+  }
+  -re {\x1b\[32m✔\x1b\[39m ([^\r\n\x1b][^\r\n]*)} {
+    set t [string trim [clean $expect_out(1,string)]]
+    if {$t ne ""} { emit done $t }
+    exp_continue
+  }
+  -re {\x1b\[36m[^\x1b\r\n ]{1,4}\x1b\[39m ([^\r\n\x1b]+)} {
+    set t [string trim $expect_out(1,string)]
+    if {$t ne $::last_sub} { set ::last_sub $t; emit sub $t }
+    exp_continue
+  }
+  -re {\| ([A-Z][^\r\n\x1b|]*\.\.\.)} {
+    set t [string trim $expect_out(1,string)]
+    if {$t ne $::last_sub} { set ::last_sub $t; emit sub $t }
+    exp_continue
+  }
+  -re {Compressing project files} { emit phase "🗜️  Compressing project"; exp_continue }
+  -re {Uploading to EAS Build} { emit phase "☁️  Uploading to EAS"; exp_continue }
+  -re {(https://expo\.dev/accounts/[^ \r\n\x1b]+/builds/[0-9a-f-]+)} {
+    set f [open $::env(EAS_URL_FILE) w]
+    puts $f $expect_out(1,string)
+    close $f
+    exp_continue
+  }
+  timeout { emit warn "⏰ Timed out waiting for EAS"; exit 5 }
+  eof
+}
+stty echo
+catch wait result
+exit [lindex $result 3]
+EXPECT
+
+set +e
+EAS_DIR="$DIR" EAS_LOG="$LOG" EAS_EVENTS="$EVENTS" EAS_URL_FILE="$URL_FILE" EAS_CMD="$EAS_CMD" \
+  EAS_TRUST_FILE="$STATE/trust.tsv" EAS_TRUST_DAYS="$TRUST_DAYS" EAS_TARGET_UDID="$UDID" expect -c "encoding system iso8859-1; source -encoding iso8859-1 {$EXP}"
+EXPECT_CODE=$?
+set -e
+if grep -q '^stopped|.*|unprovisioned$' "$EVENTS"; then
+  RESULT="device-not-provisioned-at-apple"
+  fail "Stopped before building: Apple has not accepted $UDID yet. Check its status at https://developer.apple.com/account/resources/devices/list and run again once it is Enabled."
+  exit 3
+fi
+if (( EXPECT_CODE != 0 )); then
+  RESULT="eas-failed"
+  fail "EAS build command failed (exit $EXPECT_CODE). Last lines:"
+  sed 's/\x1b\[[0-9;?]*[a-zA-Z]//g' "$LOG" | tr '\r' '\n' | grep -v '^\s*$' | tail -15 >&2
+  exit 1
+fi
+
+if [[ ! -s "$URL_FILE" ]]; then RESULT="no-build-link"; fail "No build link found. See $LOG"; exit 1; fi
+URL="$(tr -d '[:space:]' < "$URL_FILE")"
+BUILD_ID="${URL##*/}"
+emit done "🎟️  Build queued"
+RESULT="queued"
+
+show_link() { printf '\n  \033[1m🔗 Install page:\033[0m %s\n' "$URL"; }
+
+if (( WAIT == 0 )); then
+  stop_render
+  show_link
+  exit 0
+fi
+
+LAST=""
+while :; do
+  STATUS="$(cd "$DIR" && npx eas-cli build:view "$BUILD_ID" --json 2>/dev/null | jq -r '.status' || echo UNKNOWN)"
+  if [[ "$STATUS" != "$LAST" ]]; then
+    case "$STATUS" in
+      NEW|IN_QUEUE) emit phase "🧍 Waiting in the EAS queue" ;;
+      IN_PROGRESS) if [[ -n "$LAST" ]]; then emit done "🏁 Left the queue"; fi; emit phase "🔨 Building on EAS" ;;
+      FINISHED) emit done "🎉 Build finished" ;;
+      *) emit phase "🤔 Status: $STATUS" ;;
+    esac
+    LAST="$STATUS"
+  fi
+  BUILD_STATUS="$STATUS"
+  case "$STATUS" in
+    FINISHED) break ;;
+    ERRORED|CANCELED) RESULT="build-$(echo "$STATUS" | tr '[:upper:]' '[:lower:]')"; fail "Build $STATUS: $URL"; exit 1 ;;
+  esac
+  sleep 30
+done
+RESULT="finished"
+
+if [[ -n "$UDID" ]]; then
+  emit phase "📥 Downloading the IPA"
+  IPA_URL="$(cd "$DIR" && npx eas-cli build:view "$BUILD_ID" --json 2>/dev/null | jq -r '.artifacts.buildUrl')"
+  curl -sL -o "$WORK/app.ipa" "$IPA_URL"
+  (cd "$WORK" && unzip -oq app.ipa 'Payload/*.app/embedded.mobileprovision' 'Payload/*.app/PlugIns/*/embedded.mobileprovision')
+  emit done "📥 Downloaded the IPA"
+  emit phase "🔎 Looking for $UDID in each profile"
+  MISSING=0
+  while IFS= read -r profile; do
+    security cms -D -i "$profile" > "$WORK/profile.plist" 2>/dev/null
+    NAME="$(/usr/libexec/PlistBuddy -c 'Print :Name' "$WORK/profile.plist")"
+    COUNT="$(/usr/libexec/PlistBuddy -c 'Print :ProvisionedDevices' "$WORK/profile.plist" | grep -c '^ ' || true)"
+    if grep -q "$UDID" "$WORK/profile.plist"; then emit done "📱 $NAME ($COUNT devices)"; else emit warn "🚫 $NAME is missing the device"; MISSING=1; fi
+  done < <(find "$WORK/Payload" -name embedded.mobileprovision)
+  rm -rf "$WORK/app.ipa" "$WORK/Payload" "$WORK/profile.plist"
+  stop_render
+  if (( MISSING == 0 )); then
+    UDID_CHECK="present"
+    printf '\n  \033[1;32m🥳 Device can install this build\033[0m\n'
+  else
+    UDID_CHECK="missing"
+    RESULT="udid-missing"
+    printf '\n  \033[1;31m😬 Device is not in every profile\033[0m\n'
+    show_link
+    exit 1
+  fi
+else
+  stop_render
+fi
+show_link
