@@ -90,7 +90,7 @@ eas-autopilot run --flow new-flow --dir app
 The agent gets a readable transcript (each question, what was shown, the keys that answered it,
 the result line), the Flow format, and the existing Flow. It writes a Flow and runs `check` until it
 reports `green`: the Flow must send the same keys the human sent at every prompt, and must hand
-secret prompts back to the human. The Flow format is in [docs/flow-format.md](docs/flow-format.md).
+secret prompts back to the human. The Flow format is in [docs/flow-format.md](docs/flow-format.md). What is covered today, compared with eas-cli and @expo/agent-cli, is in [docs/coverage.md](docs/coverage.md).
 
 ## Recordings and history
 
