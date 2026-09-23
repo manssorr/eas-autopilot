@@ -22,6 +22,22 @@ const STATE = process.env.EAS_AUTOPILOT_STATE ?? join(homedir(), ".local", "stat
 const RUNS = join(STATE, "runs");
 const USER_FLOWS = join(STATE, "flows");
 
+const cleanups = [];
+const cleanup = () => {
+  for (const fn of cleanups.splice(0).reverse()) {
+    try {
+      fn();
+    } catch {}
+  }
+  process.stdout.write("\x1b[?25h");
+};
+for (const signal of ["SIGTERM", "SIGHUP"]) {
+  process.on(signal, () => {
+    cleanup();
+    process.exit(128 + (signal === "SIGTERM" ? 15 : 1));
+  });
+}
+
 const HELP = `eas-autopilot ${VERSION}
 
 Usage:
@@ -135,8 +151,10 @@ async function commandRun(args) {
   const dir = join(RUNS, ctx.id);
   const recorder = createRecorder(dir, ctx.header);
   const presenter = terminalPresenter({ hints: ctx.flow.hints ?? [] });
+  cleanups.push(() => presenter.close());
   presenter.done("🧹 Working tree clean");
   const child = createPtyChild(ctx.command, { cwd: ctx.dir, cols: ctx.cols, rows: ctx.rows });
+  cleanups.push(() => child.kill());
   const outcome = await run({ flow: ctx.flow, params: ctx.params, child, presenter, recorder, memory: createMemory(join(STATE, "memory.json")), mode: "run" });
   const end = { exit: outcome.exit, result: outcome.result, child_code: outcome.childCode, build_url: outcome.vars.build_url ?? null };
 
@@ -183,7 +201,9 @@ async function commandRecord(args) {
   const dir = join(RUNS, ctx.id);
   const recorder = createRecorder(dir, ctx.header);
   const presenter = passthroughPresenter();
+  cleanups.push(() => presenter.close());
   const child = createPtyChild(ctx.command, { cwd: ctx.dir, cols: ctx.cols, rows: ctx.rows });
+  cleanups.push(() => child.kill());
   const outcome = await run({ flow: ctx.flow, params: ctx.params, child, presenter, recorder, memory: null, mode: "learn" });
   presenter.close();
   recorder.close({ exit: outcome.childCode, result: outcome.childCode === 0 ? "recorded" : "recorded-failed", child_code: outcome.childCode, build_url: outcome.vars.build_url ?? null });
@@ -260,6 +280,7 @@ mkdirSync(RUNS, { recursive: true, mode: 0o700 });
 const commands = { run: commandRun, record: commandRecord, learn: commandLearn, check: commandCheck, history: commandHistory };
 const name = commands[args._[0]] ? args._[0] : "run";
 Promise.resolve(commands[name](args)).catch(error => {
+  cleanup();
   process.stderr.write(`\x1b[31m✗\x1b[0m ${error.message}\n`);
   process.exit(1);
 });

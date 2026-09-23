@@ -180,12 +180,21 @@ export function terminalPresenter({ stdout = process.stdout, stdin = process.std
       line(`  \x1b[32m✔\x1b[0m 🙌 Answered: ${question}`);
       resume();
     },
-    close: () => {
+    close: once(() => {
       clearInterval(timer);
       write("\r\x1b[K\x1b[?25h");
       input.close();
-    },
+    }),
     print: text => line(text),
+  };
+}
+
+function once(fn) {
+  let done = false;
+  return () => {
+    if (done) return;
+    done = true;
+    fn();
   };
 }
 
@@ -202,7 +211,7 @@ export function passthroughPresenter({ stdout = process.stdout, stdin = process.
     warn: () => {},
     choose: async () => "",
     ask: async (_, answered) => answered(),
-    close: () => input.close(),
+    close: once(() => input.close()),
     print: text => stdout.write(`${text}\n`),
   };
 }

@@ -1,6 +1,5 @@
 import { closeSync, mkdirSync, openSync, readFileSync, writeSync } from "node:fs";
 import { join } from "node:path";
-import { escapeRegExp } from "./ansi.js";
 
 export const RECORDING_FILE = "recording.jsonl";
 
@@ -20,11 +19,8 @@ export function createRecorder(dir, header) {
 
   const flushSecret = () => {
     if (!secret || secret.buffer.length === 0) return;
-    let data = secret.buffer.map(frame => frame.d).join("");
-    const typed = secret.typed.replace(/[\r\n]/g, "");
-    if (typed.length >= 2) data = data.split(typed).join("[redacted]");
-    data = data.replace(new RegExp(escapeRegExp(secret.question) + "[^\\r\\n]*", "g"), `${secret.question} [redacted]`);
-    write({ t: secret.buffer[0].t, k: "out", d: data });
+    const data = `\r\n\x1b[32m✔\x1b[39m \x1b[1m${secret.question}\x1b[22m [redacted]\r\n`;
+    write({ t: secret.buffer[0].t, k: "out", d: data, redacted: secret.buffer.length });
     secret.buffer = [];
   };
 

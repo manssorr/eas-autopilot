@@ -36,6 +36,10 @@ async function step(text, done, ms = 500) {
         const { password } = await promptAsync({ type: 'password', name: 'password', message: 'Password (for tester@example.com):' });
         fs.appendFileSync(resultFile, `password ${password}\n`);
       }
+      if (process.env.EAS_MOCK_CODE === '1') {
+        const { code } = await promptAsync({ type: 'text', name: 'code', message: 'Please enter the 6 digit code you received:' });
+        fs.appendFileSync(resultFile, `code ${code}\n`);
+      }
       await step('Logging in', 'Logged in Local session');
     }
     await step('Fetching Apple distribution certificates', 'Fetched Apple distribution certificates', 800);

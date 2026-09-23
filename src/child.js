@@ -119,9 +119,9 @@ export function createReplayChild(frames) {
     while (remaining.length > 0 && index < steps.length && steps[index].k === "in") {
       const step = steps[index];
       if (step.secret) {
+        while (index < steps.length && steps[index].k === "in" && steps[index].secret) index++;
         const enter = remaining.indexOf("\r");
         remaining = enter >= 0 ? remaining.slice(enter + 1) : "";
-        index++;
         offset = 0;
         continue;
       }

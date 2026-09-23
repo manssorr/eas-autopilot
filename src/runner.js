@@ -24,6 +24,7 @@ export async function run({ flow, params = {}, child, presenter, recorder, memor
   let lastSub = "";
   let queue = Promise.resolve();
   let rescan = null;
+  let carry = "";
   let childExited = false;
   child.wait().then(() => (childExited = true));
 
@@ -82,6 +83,7 @@ export async function run({ flow, params = {}, child, presenter, recorder, memor
       if (test(rule.skip_if, vars) && rule.skip_if) return;
       if (!test(rule.when, vars)) return;
       fired.add(i);
+      if (mode === "run" && rule.do?.choose?.pause) child.pause();
       capture(rule.capture, match[0], vars);
       recorder.mark("rule", { rule: rule.id ?? i, on: "output" });
       if (rule.phase) presenter.phase(interpolate(rule.phase, vars));
@@ -89,6 +91,13 @@ export async function run({ flow, params = {}, child, presenter, recorder, memor
       else if (rule.show) step(interpolate(rule.show, vars));
       if (rule.do && mode === "run" && rule.show) enqueue(() => step(interpolate(rule.show, vars)));
     });
+  };
+
+  const offsets = [[0, 0]];
+  const plainAt = rawIndex => {
+    let best = 0;
+    for (const [rawEnd, plainStart] of offsets) if (rawEnd <= rawIndex) best = plainStart;
+    return best;
   };
 
   const answered = prompt => {
@@ -117,7 +126,7 @@ export async function run({ flow, params = {}, child, presenter, recorder, memor
         return;
       }
       headerCursor = PROMPT_HEADER.lastIndex;
-      const prompt = { q: match[1].trim(), rest: strip(match[2]), rawStart: match.index, plainStart: plain.length };
+      const prompt = { q: match[1].trim(), rest: strip(match[2]), rawStart: match.index, plainStart: plainAt(match.index) };
       if (active && active.q === prompt.q) continue;
       if (active) {
         pending = prompt;
@@ -136,7 +145,6 @@ export async function run({ flow, params = {}, child, presenter, recorder, memor
   const startPrompt = prompt => {
     if (finished) return;
     active = prompt;
-    prompt.plainStart = Math.max(0, strip(raw.slice(0, prompt.rawStart)).length);
     recorder.mark("prompt.seen", { q: prompt.q });
     prompt.secret = secrets.some(regex => regex.test(prompt.q));
     if (prompt.secret) recorder.secretOpen(prompt.q);
@@ -257,7 +265,11 @@ export async function run({ flow, params = {}, child, presenter, recorder, memor
     recorder.out(data);
     if (presenter.showsRaw?.()) presenter.raw(data);
     raw += data;
-    plain += strip(data);
+    const text = carry + data;
+    const partial = text.match(/\x1b(\[[0-9;?<>=]*[ -/]*|\][^\x07]*|)$/);
+    carry = partial ? partial[0] : "";
+    offsets.push([raw.length - carry.length, plain.length]);
+    plain += strip(partial ? text.slice(0, partial.index) : text);
     scan(false);
   });
 

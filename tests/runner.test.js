@@ -8,6 +8,7 @@ import { createMemory } from "../src/memory.js";
 import { headlessPresenter } from "../src/presenter.js";
 import { createRecorder, readRecording, RECORDING_FILE } from "../src/recorder.js";
 import { run } from "../src/runner.js";
+import { checkFlow } from "../src/check.js";
 import { MOCK_COMMAND, NEW_DEVICE, ROOT, ensureMockDeps, mockEnv } from "./helpers.js";
 
 const flow = loadFlow(join(ROOT, "flows", "eas-ios-adhoc.json"));
@@ -142,3 +143,46 @@ function scriptedHuman(script) {
     close() {},
   };
 }
+
+test("an edited, visible 2FA code never reaches the recording, and check replays it", async () => {
+  const { outcome, mock, dir } = await runMock({
+    mockVars: { EAS_MOCK_CODE: "1" },
+    choose: pick({ "Use this Apple ID?": "y", "Ready to build": "y" }),
+    ask: info => (/code/.test(info.question) ? "98\x7f7654\r" : null),
+  });
+  assert.equal(outcome.exit, 0);
+  assert.match(mock.read(), /code 97654/);
+  const recording = readFileSync(join(dir, RECORDING_FILE), "utf8");
+  assert.equal(/9\\u007f|97654|7654/.test(recording), false, "code digits leaked");
+  const report = await checkFlow(flow, [dir]);
+  assert.equal(report.green, true, JSON.stringify(report.runs));
+});
+
+test("a prompt header split mid-escape across chunks is still answered", async () => {
+  const listeners = [];
+  const sent = [];
+  let resolveExit;
+  const exited = new Promise(resolve => (resolveExit = resolve));
+  const emit = data => listeners.forEach(fn => fn(data));
+  const child = {
+    write: data => {
+      sent.push(data);
+      if (data === "y\r") setTimeout(() => {
+        emit("\x1b[2K\x1b[G\x1b[32m✔\x1b[39m \x1b[1mDo you want to log in to your Apple account?\x1b[22m … yes\r\n");
+        setTimeout(() => resolveExit({ code: 0 }), 50);
+      }, 20);
+    },
+    onData: fn => listeners.push(fn),
+    settled: async () => {},
+    pause() {}, resume() {}, interrupt() {}, kill() {},
+    wait: () => exited,
+  };
+  const recorder = createRecorder(join(mockEnv().work, "split"), { id: "split" });
+  const running = run({ flow, child, presenter: headlessPresenter(), recorder, memory: createMemory(join(mockEnv().work, "m.json")) });
+  emit("noise \x1b[3");
+  emit("6m?\x1b[39m \x1b[1mDo you want to log in to your Apple account?\x1b[22m \x1b[90m›\x1b[39m (Y/n)\r\n");
+  const outcome = await running;
+  recorder.close({});
+  assert.deepEqual(sent, ["y\r"]);
+  assert.equal(outcome.exit, 0);
+});

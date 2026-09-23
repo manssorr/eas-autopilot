@@ -7,7 +7,7 @@
     "profile": { "default": "preview" },
     "udid": { "optional": true }
   },
-  "secrets": ["[Pp]assword", "two-factor|2FA|verification code|security code"],
+  "secrets": ["[Pp]assword", "two-factor|2FA|[Cc]ode\\b"],
   "hints": [
     { "match": "Waking up", "text": "npx is starting eas-cli and evaluating the app config" },
     { "match": "Fetching Apple devices", "text": "Apple's developer API lists every registered device, it is often slow" },
@@ -61,7 +61,7 @@
     },
     {
       "id": "apple-secret",
-      "on": { "prompt": "[Pp]assword|two-factor|2FA|verification code|security code" },
+      "on": { "prompt": "[Pp]assword|two-factor|2FA|[Cc]ode\\b" },
       "do": { "ask": "Apple credential needed" }
     },
     {

@@ -35,7 +35,7 @@ export async function checkFlow(flow, runDirs) {
         }
         return options.find(o => o.then === "continue")?.key ?? options.find(o => answerBytes(o.then) === "\r")?.key ?? card.options[0].key;
       },
-      ask: () => child.peekExpected(),
+      ask: () => child.peekExpected() ?? "[secret]\r",
     });
     const recorder = createRecorder(join(scratch, String(runs.length)), { id: "check" });
     const outcome = await run({ flow, params: header.params ?? {}, child, presenter, recorder, memory: createMemory(join(scratch, "memory.json")) });
