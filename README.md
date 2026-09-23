@@ -7,7 +7,7 @@ It was built for the everyday case of adding a tester's iPhone to an internal (a
 register the device, rebuild, and make sure the new provisioning profile actually contains it.
 
 ```
-  📦 EAS iOS preview build eas-autopilot v0.7.0
+  📦 EAS iOS preview build eas-autopilot v0.8.0
 
   ✔ 🧹 Working tree clean 0s
   ✔ 🌱 Loaded preview environment 2s
@@ -60,22 +60,32 @@ only once the upload finishes. When EAS starts compressing the project, `eas-aut
 EAS process group (`SIGSTOP`) and shows a summary:
 
 ```
-  🧾 Ready to build (EAS is paused, nothing uploaded, no build created yet)
-  profile preview · main @ 1a2b3c4
-  devices per target:
-    - App: 55
-    - Widget: 55
-  ✔ 00008000-0000000000000000 was not refused by Apple
-  💳 42% of included build credits used this period
-  Enter/y start the build   n cancel, nothing is built
+  ╭─ 🧾 Ready to build
+  │  EAS is paused. Nothing is uploaded and no build exists yet.
+  │
+  │  profile   preview
+  │  source    main @ 1a2b3c4
+  │  devices   App: 55
+  │            Widget: 55
+  │  ✔ 00008000-0000000000000000 is in this build
+  │  💳 42% of included build credits used this period
+  │
+  │  ❯ Start the build  y
+  │    Cancel, nothing is built  n
+  │
+  ╰─ ↑↓ move · Enter select · or press the key
 ```
 
-Enter resumes EAS. `n` interrupts it, and no build is created. Pass `--yes` to skip this step.
+Start resumes EAS. Cancel interrupts it, and no build is created. Pass `--yes` to skip this step.
 
 ## When it stops for you
 
-- **Apple ID.** It shows the saved address. Press Enter to use it, `t` to use it and trust it for 3
-  days (no question on the next runs), or `n` to type another.
+- **Apple ID.** It shows the saved address: use it, use it and trust it for 3 days (no question on
+  the next runs), or type another.
+
+Every question is a small menu: ↑/↓ (or `j`/`k`) to move, Enter to select, or press the shortcut key
+shown next to the option. The card disappears after you answer and leaves one ✔ line in the log.
+`EAS_AUTOPILOT_UI=gum` switches the menus to [gum](https://github.com/charmbracelet/gum) (experimental).
 - **Apple refused your device.** A newly registered device can stay in *Processing* at Apple for up
   to 72 hours. Building now would leave it out and still use a build credit, so Enter stops the run
   before anything is uploaded.

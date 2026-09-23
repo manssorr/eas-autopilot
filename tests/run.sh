@@ -25,6 +25,7 @@ export EAS_MOCK_NODE_MODULES="$DEPS/node_modules"
 export EAS_MOCK_NEW_DEVICE="00000000-000A00000B00000C"
 export EAS_AUTOPILOT_STATE="$WORK/state"
 export EAS_AUTOPILOT_CMD="node $HERE/mock-eas.js"
+export EAS_AUTOPILOT_UI=builtin
 
 pass=0
 fail=0
@@ -54,7 +55,7 @@ check "trust saved" "$(cut -f1 "$EAS_AUTOPILOT_STATE/trust.tsv")" tester@example
 echo "Case 2: trusted Apple ID, no question asked"
 run_case trusted 0 x
 check "exit code" "$CODE" 0
-check "no Apple ID question" "$(grep -c 'use it and trust' "$WORK/out-trusted" || true)" 0
+check "no Apple ID question" "$(grep -c 'trust for' "$WORK/out-trusted" || true)" 0
 
 echo "Case 3: Apple refuses the new device, Enter stops before building"
 run_case refused 1 t

@@ -1,10 +1,10 @@
 set timeout 120
 spawn $env(TOOL) --dir $env(APP_DIR) --udid $env(EAS_MOCK_NEW_DEVICE)
 expect {
-  -re {use it and trust} { send $env(APPLE_ID_KEY); exp_continue }
-  -re {build anyway without it} { send "\r"; exp_continue }
-  -re {start the build} { send $env(CONFIRM_KEY); exp_continue }
-  -re {DECISION NEEDED: EAS asked} { puts "\nDRIVER: unexpected decision"; exit 9 }
+  -re {trust for [0-9]+ days} { send $env(APPLE_ID_KEY); exp_continue }
+  -re {Build without it} { send "\r"; exp_continue }
+  -re {Start the build} { send $env(CONFIRM_KEY); exp_continue }
+  -re {Decision needed} { puts "\nDRIVER: unexpected decision"; exit 9 }
   timeout { puts "\nDRIVER: timeout"; exit 8 }
   eof
 }
