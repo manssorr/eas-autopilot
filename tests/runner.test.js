@@ -221,3 +221,13 @@ test("a question shows what the command printed since the previous answer", asyn
   assert.equal(asks.length, 2);
   assert.match(asks[1].screen, /diff --git a\/Expo\.plist/);
 });
+
+test("the refused-device question is asked once per run, not once per target", async () => {
+  const { outcome, presenter, mock } = await runMock({
+    mockVars: { EAS_MOCK_FAIL: "2" },
+    choose: pick({ "Use this Apple ID?": "y", "Your device is not in this build": "y", "Ready to build": "n" }),
+  });
+  assert.equal(outcome.exit, 4);
+  assert.equal(presenter.log.filter(e => e.choose === "Your device is not in this build").length, 1);
+  assert.equal((mock.read().match(/^continue true$/gm) ?? []).length, 3);
+});

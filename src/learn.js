@@ -9,7 +9,7 @@ export function transcript(frames) {
   const lines = [];
   let raw = "";
   let current = null;
-  const notable = /(✔ .+|Failed to provision.+|Compressing project files|Uploading to EAS Build|https:\/\/expo\.dev\/\S+|Setting up credentials for target \S+|Error: .+)/;
+  const notable = /(✔ .+|Failed to provision.+|Compressing project files|Uploading to EAS Build|https:\/\/expo\.dev\/\S+\/builds\/\S+|Setting up credentials for target \S+|Error: .+)/;
   let plainCursor = 0;
   const flushNotable = () => {
     const plain = strip(raw);
@@ -37,8 +37,10 @@ export function transcript(frames) {
       current.keys.push(frame.secret ? `[secret, ${frame.n} chars]` : `${frame.by}:${visibleKeys(frame.d)}`);
     }
     if (frame.k === "mark" && frame.name === "prompt.done" && current) {
-      const screen = strip(raw.slice(current.start)).split(/[\r\n]+/).map(l => l.trim()).filter(Boolean);
-      const done = screen.reverse().find(l => /^(✔|✖)/.test(l) && l.includes(current.q));
+      const all = strip(raw.slice(current.start)).split(/[\r\n]+/).map(l => l.trim()).filter(Boolean);
+      const end = all.findIndex(l => /^(✔|✖)/.test(l) && l.includes(current.q));
+      const screen = end >= 0 ? all.slice(0, end + 1) : all;
+      const done = end >= 0 ? all[end] : null;
       lines.push(`PROMPT t=${(current.t / 1000).toFixed(1)}s  "${current.q}"`);
       if (current.rest) lines.push(`  shown:   ${current.rest}`);
       const items = screen.filter(l => /^[◉◯]/.test(l)).slice(-12);
@@ -49,7 +51,7 @@ export function transcript(frames) {
     }
     if (frame.k === "mark" && frame.name === "run.end") lines.push(`END  result=${frame.data?.result} exit=${frame.data?.exit}`);
   }
-  return lines.join("\n");
+  return lines.join("\n").replace(/[\w.+%-]+@[\w-]+(\.[\w-]+)+/g, "<email>");
 }
 
 export function agentPrompt({ frames, runId, flowText, outputPath }) {

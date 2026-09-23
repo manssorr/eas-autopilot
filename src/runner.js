@@ -13,6 +13,7 @@ export async function run({ flow, params = {}, child, presenter, recorder, memor
   const secrets = [...DEFAULT_SECRETS, ...(flow?.secrets ?? [])].map(source => new RegExp(source, "i"));
   const outputCursor = new Map();
   const fired = new Set();
+  const runChoices = new Map();
 
   let raw = "";
   let plain = "";
@@ -224,6 +225,12 @@ export async function run({ flow, params = {}, child, presenter, recorder, memor
       if (remember.show) step(interpolate(remember.show, vars));
       return;
     }
+    if (spec.per_run && runChoices.has(title)) {
+      const option = spec.options.find(o => o.key === runChoices.get(title));
+      recorder.mark("decision", { text: `${title}: ${option.label} (same as earlier in this run)` });
+      await perform(option.then ?? "continue", rule, prompt);
+      return;
+    }
     if (spec.pause) child.pause();
     recorder.mark("pause");
     const key = await presenter.choose({
@@ -243,6 +250,7 @@ export async function run({ flow, params = {}, child, presenter, recorder, memor
       return;
     }
     recorder.mark("decision", { text: `${title}: ${option.label}` });
+    if (spec.per_run) runChoices.set(title, key);
     if (memoryKey) memory?.approve(memoryKey, option.remember ? remember.days ?? 0 : 0);
     if (spec.pause && !option.then?.exit) child.resume();
     await perform(option.then ?? "continue", rule, prompt);

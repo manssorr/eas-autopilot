@@ -7,7 +7,7 @@ const fs = require('fs');
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const resultFile = process.env.EAS_MOCK_RESULT;
 const newDevice = process.env.EAS_MOCK_NEW_DEVICE;
-const failMode = process.env.EAS_MOCK_FAIL === '1';
+const failMode = ['1', '2'].includes(process.env.EAS_MOCK_FAIL);
 
 async function step(text, done, ms = 500) {
   const spinner = ora(text).start();
@@ -49,7 +49,7 @@ async function step(text, done, ms = 500) {
     const chosen = await chooseDevicesAsync(devices, alreadyProvisioned);
     fs.appendFileSync(resultFile, `selected ${target.split(' ')[0]} ${chosen.length}/${devices.length}\n`);
     await step('Handling Apple ad hoc provisioning profiles', `Updated existing profile: *[expo] ${target.split(' ')[0]} AdHoc`, 800);
-    if (index === 0 && failMode) {
+    if ((index === 0 || process.env.EAS_MOCK_FAIL === '2') && failMode) {
       console.log('Failed to provision 2 of the selected devices:');
       console.log(`- ${newDevice} (iPhone) (created at: 2026-01-02T03:04:05.000Z)`);
       console.log(`- ${devices[1].identifier} (iPhone) (Tester 1)`);
