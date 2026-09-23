@@ -12,6 +12,7 @@ mode it reaches the human as an unknown prompt; teach it with `record` → `lear
 | # | Scenario (eas-cli prompt) | eas-cli source | eas-autopilot | @expo/agent-cli |
 | --- | --- | --- | --- | --- |
 | 1 | Working tree dirty: "Commit changes to git?" | `build/utils/repository.js` | ✅ checked before EAS starts; whitespace-only changes restored, real changes stop the run | — |
+| 1b | Tree made dirty during the run (EAS re-indents `Expo.plist`): "Can we commit these changes to git for you?" (Yes / Show the diff and ask me again / Abort) | `build/utils/repository.js` | ❌ reaches the human; the diff is shown since 1.0.0+ (seen in a real run) | — |
 | 2 | "Do you want to log in to your Apple account?" | `credentials/context.js` | ✅ yes | — |
 | 3 | "Apple ID:" (saved address prefilled) | `credentials/ios/appstore/resolveCredentials.js` | 🙋 menu: use it, trust it for 3 days, or type another | — |
 | 4 | Apple password, 2FA code | `credentials/ios/appstore/` | 🙋 answered in EAS's own prompt; never recorded | — |
