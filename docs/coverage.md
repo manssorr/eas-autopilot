@@ -1,33 +1,33 @@
 # Coverage
 
 Source baseline: eas-cli 24.7.0 (299 interactive prompt call sites found in `build/`),
-@expo/agent-cli 1.0.16, eas-autopilot 1.0.0 with the `eas-ios-adhoc` Flow. Checked 2026-09-23.
+@expo/agent-cli 1.0.16, eas-autopilot 1.0.0 with the `eas-ios-adhoc` Flow. Checked 2026-09-24.
 
 Legend: ✅ answered automatically · 🙋 handed to the human on purpose · ❌ not handled (in `run`
 mode it reaches the human as an unknown prompt; teach it with `record` → `learn` → `check`) ·
-— not applicable.
+— not applicable. A prompt with no rule is never guessed: it reaches the human in EAS's own prompt.
 
 ## iOS internal (ad hoc) build: `eas build --platform ios --profile preview`
 
 | # | Scenario (eas-cli prompt) | eas-cli source | eas-autopilot | @expo/agent-cli |
 | --- | --- | --- | --- | --- |
 | 1 | Working tree dirty: "Commit changes to git?" | `build/utils/repository.js` | ✅ checked before EAS starts; whitespace-only changes restored, real changes stop the run | — |
-| 1b | Tree made dirty during the run: "Can we commit these changes to git for you?" (Yes / Show the diff and ask me again / Abort). In a project with a committed `ios/` and expo-updates, eas-cli runs `expo-updates configuration:syncnative`, which rewrites `Expo.plist` with `@expo/plist` (2-space indent, no final newline) even when no value changed. | `build/ios/syncProjectConfiguration.js`, `build/utils/repository.js` | 🙋 card: stop with the fix (recommended), or answer in EAS's prompt. Permanent fix on the project side: commit `Expo.plist` in that format. | — |
+| 1b | Tree made dirty during the run: "Can we commit these changes to git for you?" (Yes / Show the diff and ask me again / Abort). In a project with a committed `ios/` and expo-updates, eas-cli runs `expo-updates configuration:syncnative`, which rewrites `Expo.plist` with `@expo/plist` (2-space indent, no final newline) even when no value changed. | `build/ios/syncProjectConfiguration.js`, `build/utils/repository.js` | 🙋 card: stop with the fix (recommended), or answer in EAS's prompt. Permanent fix on the project side: commit the mirror files in the format EAS writes (`npx --no-install expo-updates configuration:syncnative --workflow generic --platform ios`, then `--platform android`); Android `strings.xml` drifts the same way (final newline removed) | — |
 | 2 | "Do you want to log in to your Apple account?" | `credentials/context.js` | ✅ yes | — |
 | 3 | "Apple ID:" (saved address prefilled) | `credentials/ios/appstore/resolveCredentials.js` | 🙋 menu: use it, trust it for 3 days, or type another | — |
 | 4 | Apple password, 2FA code | `credentials/ios/appstore/` | 🙋 answered in EAS's own prompt; never recorded | — |
-| 5 | "Select your Apple Team Type:", Apple Team ID, provider | `credentials/ios/appstore/resolveCredentials.js` | ❌ | — |
-| 6 | "Reuse this distribution certificate?" / select or revoke certificates | `credentials/ios/actions/SetUpDistributionCertificate.js` | ❌ | — |
-| 7 | "Would you like to set up Push Notifications for your project?" / reuse or select push key | `credentials/ios/IosCredentialsProvider.js`, `SetUpPushKey.js` | ❌ | — |
-| 8 | "You don't have any registered devices yet. Would you like to register them now?" | `SetUpAdhocProvisioningProfile.js` | ❌ | — |
+| 5 | "Select your Apple Team Type:", Apple Team ID, provider | `credentials/ios/appstore/resolveCredentials.js` | 🙋 left to the human on purpose: it identifies the Apple account | — |
+| 6 | "Reuse this distribution certificate?" / select or revoke certificates | `credentials/ios/actions/SetUpDistributionCertificate.js` | ✅ reuse: yes (the certificate EAS already stores). Selecting or revoking certificates stays with the human | — |
+| 7 | "Would you like to set up Push Notifications for your project?" / reuse or select push key | `credentials/ios/IosCredentialsProvider.js`, `SetUpPushKey.js` | 🙋 left to the human on purpose: setting it up creates an APNs key on the Apple account | — |
+| 8 | "You don't have any registered devices yet. Would you like to register them now?" | `SetUpAdhocProvisioningProfile.js` | ✅ stops before anything is built and names the fix: `eas device:create` | — |
 | 9 | Profile is missing devices: "Would you like to choose the devices to provision again?" | `SetUpAdhocProvisioningProfile.js` | ✅ yes | — |
 | 10 | "Select devices for the ad hoc build:" (multiselect) | `credentials/ios/actions/DeviceUtils.js` | ✅ selects every device, submits only after it has checked that every visible item is selected | — |
 | 11 | All devices present: "Would you like to reuse the profile?" | `SetUpAdhocProvisioningProfile.js` | ✅ yes | — |
 | 12 | Apple refused devices: "Do you want to continue without provisioning these devices?" | `SetUpAdhocProvisioningProfile.js` | ✅ yes, unless the list contains `--udid`; then 🙋 stop (recommended) or build without it | — |
 | 13 | Existing Apple profile: "Would you like to reuse …?" (`SetUpProvisioningProfile.js`) | `credentials/ios/actions/SetUpProvisioningProfile.js` | ❌ unverified whether the reuse rule's wording matches this prompt | — |
-| 14 | Replace with credentials.json? | `SetUpTargetBuildCredentialsFromCredentialsJson.js` | ❌ | — |
-| 15 | "iOS app only uses standard/exempt encryption?" | `project/ios/exemptEncryption.js` | ❌ | — |
-| 16 | Install expo-dev-client / configure expo-updates / "What is the next build number?" | `build/utils/devClient.js`, `build/runBuildAndSubmit.js`, `build/utils/version.js` | ❌ | — |
+| 14 | Replace with credentials.json? | `SetUpTargetBuildCredentialsFromCredentialsJson.js` | 🙋 left to the human on purpose: it replaces stored credentials | — |
+| 15 | "iOS app only uses standard/exempt encryption?" | `project/ios/exemptEncryption.js` | 🙋 left to the human on purpose: export compliance is a legal answer | — |
+| 16 | Install expo-dev-client / configure expo-updates / "What is the next build number?" | `build/utils/devClient.js`, `build/runBuildAndSubmit.js`, `build/utils/version.js` | 🙋 left to the human on purpose: each one changes the project or its version | — |
 | 17 | Upload starts (no prompt: "Compressing project files") | `build/` | 🙋 EAS paused, summary shown, build only after a yes | — |
 | 18 | Build link printed | `build/` | ✅ captured; `--udid` then follows the build and checks every profile in the IPA | — |
 

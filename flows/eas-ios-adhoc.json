@@ -151,6 +151,29 @@
       }
     },
     {
+      "id": "reuse-distribution-certificate",
+      "on": {
+        "prompt": "^Reuse this distribution certificate\\?"
+      },
+      "do": {
+        "answer": "y"
+      },
+      "show": "♻️  Reusing the distribution certificate"
+    },
+    {
+      "id": "no-registered-devices",
+      "on": {
+        "prompt": "^You don't have any registered devices yet"
+      },
+      "do": {
+        "exit": {
+          "code": 6,
+          "result": "no-registered-devices",
+          "message": "No devices are registered for this Apple team. Register them with npx eas-cli device:create, then run again."
+        }
+      }
+    },
+    {
       "id": "choose-devices-again",
       "on": {
         "prompt": "^Would you like to choose the devices to provision again\\?"

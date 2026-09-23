@@ -53,6 +53,9 @@ It is built for adding a tester's iPhone to an internal build.
 | Select devices for the ad hoc build | selects every device, and submits only after checking that every visible item is selected |
 | Continue without devices Apple refused? | yes, unless the list contains your `--udid`; then it offers to stop before anything is built |
 | Reuse the profile? | yes |
+| Reuse this distribution certificate? | yes |
+| No registered devices yet, register now? | stops before anything is built and names `eas device:create` |
+| Can we commit these changes to git for you? (EAS rewrote a native file mid-run) | menu: stop with the fix (recommended), or answer it yourself |
 | Password or 2FA code | handed to you in EAS's own prompt, and never recorded |
 
 **Nothing is built until you confirm.** When EAS starts compressing the project, the Flow pauses
@@ -74,7 +77,7 @@ the EAS process group and shows a summary:
   ╰─ ↑↓ move · Enter select · or press the key
 ```
 
-Every question is a menu like this one. Keys pressed while the tool works are discarded, so a
+Everything else (Apple team type, push notifications, export compliance, build numbers, installing packages) is yours to answer, in EAS's own prompt. Every question the tool asks is a menu like this one. Keys pressed while the tool works are discarded, so a
 stray Enter cannot answer a prompt. A prompt the Flow does not know is handed to you in place, and
 the run tells you to teach it with `learn`.
 

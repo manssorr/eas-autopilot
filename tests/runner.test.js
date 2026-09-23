@@ -231,3 +231,24 @@ test("the refused-device question is asked once per run, not once per target", a
   assert.equal(presenter.log.filter(e => e.choose === "Your device is not in this build").length, 1);
   assert.equal((mock.read().match(/^continue true$/gm) ?? []).length, 3);
 });
+
+test("a multi-line question is answered once and the run carries on", async () => {
+  const { outcome, mock, presenter } = await runMock({
+    mockVars: { EAS_MOCK_CERT: "1" },
+    choose: pick({ "Use this Apple ID?": "y", "Ready to build": "y" }),
+  });
+  assert.equal(outcome.exit, 0);
+  assert.match(mock.read(), /^reuse-cert true$/m);
+  assert.ok(presenter.log.some(e => e.done === "♻️  Reusing the distribution certificate"));
+  assert.equal(presenter.log.filter(e => e.ask).length, 0);
+});
+
+test("no registered devices: stop with the fix, nothing is built", async () => {
+  const { outcome, mock } = await runMock({
+    mockVars: { EAS_MOCK_NO_DEVICES: "1" },
+    choose: pick({ "Use this Apple ID?": "y" }),
+  });
+  assert.equal(outcome.exit, 6);
+  assert.equal(outcome.result, "no-registered-devices");
+  assert.doesNotMatch(mock.read(), /^uploaded$/m);
+});

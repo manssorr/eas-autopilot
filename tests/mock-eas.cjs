@@ -43,6 +43,14 @@ async function step(text, done, ms = 500) {
       await step('Logging in', 'Logged in Local session');
     }
     await step('Fetching Apple distribution certificates', 'Fetched Apple distribution certificates', 800);
+    if (index === 0 && process.env.EAS_MOCK_CERT === '1') {
+      const reuse = await confirmAsync({ message: 'Reuse this distribution certificate?\nCert ID: ABC123, Serial number: 00FF, Team ID: TEAM1', initial: true });
+      fs.appendFileSync(resultFile, `reuse-cert ${reuse}\n`);
+    }
+    if (index === 0 && process.env.EAS_MOCK_NO_DEVICES === '1') {
+      const register = await confirmAsync({ message: "You don't have any registered devices yet. Would you like to register them now?", initial: true });
+      fs.appendFileSync(resultFile, `register ${register}\n`);
+    }
     console.log('The provisioning profile is missing the following devices:');
     devices.slice(0, 3).forEach(d => console.log(`- ${d.identifier}`));
     if (!(await confirmAsync({ message: 'Would you like to choose the devices to provision again?' }))) continue;

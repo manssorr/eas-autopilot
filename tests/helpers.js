@@ -30,6 +30,8 @@ export function mockEnv(extra = {}) {
       EAS_MOCK_FAIL: "0",
       EAS_MOCK_PASSWORD: "0",
       EAS_MOCK_CODE: "0",
+      EAS_MOCK_CERT: "0",
+      EAS_MOCK_NO_DEVICES: "0",
       ...extra,
     },
   };
