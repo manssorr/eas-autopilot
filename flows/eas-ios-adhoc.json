@@ -265,6 +265,47 @@
       "show": "♻️  Profile already has every device, reusing it"
     },
     {
+      "id": "eas-dirty-tree",
+      "on": {
+        "prompt": "^Can we commit these changes to git for you\\?"
+      },
+      "do": {
+        "choose": {
+          "tone": "warn",
+          "icon": "🧹",
+          "title": "EAS made the working tree dirty",
+          "body": [
+            "EAS rewrote a committed native file during the build, usually",
+            "\u001b[1mios/<App>/Supporting/Expo.plist\u001b[0m re-indented by expo-updates.",
+            "",
+            "\u001b[2m\"Yes\" would commit it to your current branch as \"[EAS Build] Run EAS Build for iOS\".\u001b[0m",
+            "\u001b[2mPermanent fix: commit the file in the format EAS writes:\u001b[0m",
+            "\u001b[2mnode node_modules/expo-updates/bin/cli.js configuration:syncnative --platform ios --workflow generic\u001b[0m"
+          ],
+          "options": [
+            {
+              "key": "n",
+              "label": "Stop, nothing is built (recommended)",
+              "then": {
+                "exit": {
+                  "code": 5,
+                  "result": "eas-rewrote-native-file",
+                  "message": "Stopped: EAS rewrote a committed native file. Run git diff, commit the file in the format EAS writes (expo-updates configuration:syncnative), then run again."
+                }
+              }
+            },
+            {
+              "key": "a",
+              "label": "Answer it myself in EAS's prompt",
+              "then": {
+                "ask": "EAS wants to commit the changed files"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
       "id": "build-link",
       "on": {
         "output": "https://expo\\.dev/accounts/\\S+/builds/[0-9a-f-]+"

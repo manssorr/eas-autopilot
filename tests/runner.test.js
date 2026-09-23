@@ -194,7 +194,7 @@ test("a question shows what the command printed since the previous answer", asyn
   const emit = data => listeners.forEach(fn => fn(data));
   const header = q => `\x1b[36m?\x1b[39m \x1b[1m${q}\x1b[22m \x1b[90m›\x1b[39m - Use arrow-keys.\r\n`;
   const done = (q, a) => `\x1b[2K\x1b[G\x1b[32m✔\x1b[39m \x1b[1m${q}\x1b[22m › ${a}\r\n`;
-  const q = "Can we commit these changes to git for you?";
+  const q = "Which build profile should we use?";
   let answers = 0;
   const child = {
     write: data => {
