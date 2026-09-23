@@ -233,7 +233,7 @@ export function headlessPresenter({ choose = () => "", ask = () => null } = {}) 
       return choose(card);
     },
     ask: async (info, answered) => {
-      log.push({ ask: info.question, why: info.why });
+      log.push({ ask: info.question, why: info.why, screen: info.screen });
       const typed = await ask(info);
       if (typed !== null && typed !== undefined) sink?.input(typed);
       await answered();

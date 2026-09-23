@@ -186,3 +186,38 @@ test("a prompt header split mid-escape across chunks is still answered", async (
   assert.deepEqual(sent, ["y\r"]);
   assert.equal(outcome.exit, 0);
 });
+
+test("a question shows what the command printed since the previous answer", async () => {
+  const listeners = [];
+  let resolveExit;
+  const exited = new Promise(resolve => (resolveExit = resolve));
+  const emit = data => listeners.forEach(fn => fn(data));
+  const header = q => `\x1b[36m?\x1b[39m \x1b[1m${q}\x1b[22m \x1b[90m›\x1b[39m - Use arrow-keys.\r\n`;
+  const done = (q, a) => `\x1b[2K\x1b[G\x1b[32m✔\x1b[39m \x1b[1m${q}\x1b[22m › ${a}\r\n`;
+  const q = "Can we commit these changes to git for you?";
+  let answers = 0;
+  const child = {
+    write: data => {
+      if (!data.includes("\r")) return;
+      answers += 1;
+      setTimeout(() => {
+        emit(done(q, answers === 1 ? "Show the diff and ask me again" : "Abort build process"));
+        if (answers === 1) setTimeout(() => emit("diff --git a/Expo.plist b/Expo.plist\r\n-<dict>\r\n+  <dict>\r\n" + header(q)), 30);
+        else setTimeout(() => resolveExit({ code: 1 }), 30);
+      }, 20);
+    },
+    onData: fn => listeners.push(fn),
+    settled: async () => {},
+    pause() {}, resume() {}, interrupt() {}, kill() {},
+    wait: () => exited,
+  };
+  const presenter = headlessPresenter({ ask: () => "\r" });
+  const recorder = createRecorder(join(mockEnv().work, "diff"), { id: "diff" });
+  const running = run({ flow, child, presenter, recorder, memory: createMemory(join(mockEnv().work, "m.json")) });
+  emit(header(q));
+  await running;
+  recorder.close({});
+  const asks = presenter.log.filter(e => e.ask);
+  assert.equal(asks.length, 2);
+  assert.match(asks[1].screen, /diff --git a\/Expo\.plist/);
+});

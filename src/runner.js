@@ -25,6 +25,8 @@ export async function run({ flow, params = {}, child, presenter, recorder, memor
   let queue = Promise.resolve();
   let rescan = null;
   let carry = "";
+  let lastDoneRaw = 0;
+  let lastHumanAnswer = 0;
   let childExited = false;
   child.wait().then(() => (childExited = true));
 
@@ -170,6 +172,7 @@ export async function run({ flow, params = {}, child, presenter, recorder, memor
       }
       if (rule?.show && !finished) step(interpolate(rule.show, vars));
       recorder.mark("prompt.done", { q: prompt.q });
+      lastDoneRaw = raw.length;
       if (prompt.secret) recorder.secretClose();
       active = null;
       const next = pending;
@@ -181,7 +184,9 @@ export async function run({ flow, params = {}, child, presenter, recorder, memor
 
   const ask = async (prompt, why) => {
     recorder.mark("pause");
-    await presenter.ask({ why, question: prompt.q, screen: raw.slice(prompt.rawStart), secret: prompt.secret }, () => waitAnswered(prompt, 0));
+    const from = Math.max(Math.min(lastDoneRaw, prompt.rawStart), prompt.rawStart - 20000);
+    await presenter.ask({ why, question: prompt.q, screen: raw.slice(from), secret: prompt.secret }, () => waitAnswered(prompt, 0));
+    lastHumanAnswer = Date.now();
     recorder.mark("decision", { text: `${why}: answered by the human (${prompt.q})` });
     recorder.mark("resume");
   };
@@ -280,7 +285,7 @@ export async function run({ flow, params = {}, child, presenter, recorder, memor
   const childCode = exitInfo.code ?? 1;
   const outcome = finished ?? {
     exit: childCode === 0 ? 0 : 1,
-    result: childCode === 0 ? (vars.build_url ? "queued" : "completed") : "eas-failed",
+    result: childCode === 0 ? (vars.build_url ? "queued" : "completed") : lastHumanAnswer && Date.now() - lastHumanAnswer < 5000 ? "aborted-at-prompt" : "eas-failed",
   };
   return { ...outcome, childCode, vars, divergence: child.divergence?.() ?? null };
 }
