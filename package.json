@@ -1,0 +1,14 @@
+{
+  "name": "eas-autopilot",
+  "version": "1.0.0",
+  "description": "Run interactive EAS builds hands-off: record runs, turn recordings into Flows, replay them.",
+  "type": "module",
+  "bin": { "eas-autopilot": "bin/eas-autopilot.js" },
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "postinstall": "node scripts/fix-pty.js",
+    "test": "node --test tests/*.test.js"
+  },
+  "dependencies": { "node-pty": "1.1.0" },
+  "license": "MIT"
+}

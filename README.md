@@ -1,18 +1,17 @@
 # eas-autopilot
 
-Run an interactive `eas build` for iOS without babysitting it. `eas-autopilot` answers the
-routine credential prompts, shows live progress, and stops only when a decision is really yours.
-
-It was built for the everyday case of adding a tester's iPhone to an internal (ad hoc) build:
-register the device, rebuild, and make sure the new provisioning profile actually contains it.
+Run interactive `eas build` commands without babysitting them. `eas-autopilot` answers the
+routine prompts, shows live progress, and stops only when a decision is really yours. Every run is
+recorded, and a recorded run can be turned into a new automation by an agent, then checked by
+replaying it.
 
 ```
-  📦 EAS iOS preview build eas-autopilot v0.8.0
+  📦 eas-ios-adhoc run · eas-autopilot 1.0.0
+  main @ 1a2b3c4 · eas-cli 24.7.0
 
   ✔ 🧹 Working tree clean 0s
   ✔ 🌱 Loaded preview environment 2s
   ✔ 🍏 Apple ID you@example.com (trusted, 71h left) 0s
-  ✔ Fetched Apple provisioning profiles 4s
   ✔ 📱 Selected all 55 registered devices 2s
   ✔ Updated existing profile: *[expo] com.example.app AdHoc 18s
   ⠹ 🎯 Credentials for Widget · Fetching Apple devices... 14s — Apple's developer API lists every registered device, it is often slow
@@ -20,44 +19,44 @@ register the device, rebuild, and make sure the new provisioning profile actuall
 
 ## Install
 
-Needs macOS with `expect`, `jq`, `python3`, `git` and Node (for `npx eas-cli`). All ship with macOS
-or Homebrew.
+Needs macOS or Linux, Node 20+, and git.
 
 ```bash
 git clone https://github.com/manssorr/eas-autopilot.git
-ln -s "$PWD/eas-autopilot/bin/eas-autopilot" ~/.local/bin/eas-autopilot
+cd eas-autopilot && npm install
+ln -s "$PWD/bin/eas-autopilot.js" ~/.local/bin/eas-autopilot
 ```
 
-## Use
+## Commands
 
-```bash
-eas-autopilot --dir path/to/expo-app --udid <new device UDID>
-```
-
-| Flag | Meaning |
+| Command | What it does |
 | --- | --- |
-| `--dir` | Expo app directory (default: current directory) |
-| `--profile` | `eas.json` build profile (default: `preview`) |
-| `--udid` | After the build finishes, download the IPA and confirm this device is in every provisioning profile. Implies `--wait`. |
-| `--wait` | Follow the build until EAS finishes it |
-| `--yes` | Start the build without the final confirmation |
-| `--history [N]` | Print the last N runs |
+| `eas-autopilot run` | Runs the Flow's command and answers its prompts. Default Flow: `eas-ios-adhoc`. |
+| `eas-autopilot record` | Runs the command untouched: you see the plain EAS screen, and every byte and key is recorded. |
+| `eas-autopilot learn <run>` | Prints a prompt that tells an agent how to turn that recording into a Flow. |
+| `eas-autopilot check <flow> [run…]` | Replays recorded runs through a Flow and reports every divergence. |
+| `eas-autopilot history [N]` | Lists recent runs. |
 
-## What it answers for you
+`run` options: `--dir <app>`, `--flow <id|file>`, `--profile <name>` (default `preview`),
+`--udid <UDID>` (confirm the device is in the build, then wait for the build and check the IPA),
+`--wait`, `--yes` (skip the final confirmation), `--no-follow`.
+
+## The eas-ios-adhoc Flow
+
+It is built for adding a tester's iPhone to an internal build.
 
 | EAS asks | Answer |
 | --- | --- |
 | Log in to your Apple account? | yes |
+| Apple ID | you choose: use it, trust it for 3 days, or type another |
 | Choose the devices to provision again? | yes |
-| Select devices for the ad hoc build | selects **every** registered device, and submits only after it has checked the list shows all of them selected |
+| Select devices for the ad hoc build | selects every device, and submits only after checking that every visible item is selected |
+| Continue without devices Apple refused? | yes, unless the list contains your `--udid`; then it offers to stop before anything is built |
 | Reuse the profile? | yes |
-| Continue without devices Apple refused? | yes, **unless** the refused list contains your `--udid` |
+| Password or 2FA code | handed to you in EAS's own prompt, and never recorded |
 
-## Nothing is built until you confirm
-
-EAS asks no question between setting up credentials and uploading the source, and a build exists
-only once the upload finishes. When EAS starts compressing the project, `eas-autopilot` pauses the
-EAS process group (`SIGSTOP`) and shows a summary:
+**Nothing is built until you confirm.** When EAS starts compressing the project, the Flow pauses
+the EAS process group and shows a summary:
 
 ```
   ╭─ 🧾 Ready to build
@@ -65,10 +64,9 @@ EAS process group (`SIGSTOP`) and shows a summary:
   │
   │  profile   preview
   │  source    main @ 1a2b3c4
-  │  devices   App: 55
-  │            Widget: 55
+  │  devices   App: 55, Widget: 55
   │  ✔ 00008000-0000000000000000 is in this build
-  │  💳 42% of included build credits used this period
+  │  💳 42% of included build credits used
   │
   │  ❯ Start the build  y
   │    Cancel, nothing is built  n
@@ -76,59 +74,53 @@ EAS process group (`SIGSTOP`) and shows a summary:
   ╰─ ↑↓ move · Enter select · or press the key
 ```
 
-Start resumes EAS. Cancel interrupts it, and no build is created. Pass `--yes` to skip this step.
+Every question is a menu like this one. Keys pressed while the tool works are discarded, so a
+stray Enter cannot answer a prompt. A prompt the Flow does not know is handed to you in place, and
+the run tells you to teach it with `learn`.
 
-## When it stops for you
+## Teaching it a new flow
 
-- **Apple ID.** It shows the saved address: use it, use it and trust it for 3 days (no question on
-  the next runs), or type another.
+```bash
+eas-autopilot record --dir app -- npx eas-cli submit --platform ios   # answer it yourself, once
+eas-autopilot learn latest > prompt.md                                 # give prompt.md to an agent
+eas-autopilot check ~/.local/state/eas-autopilot/flows/new-flow.json latest
+eas-autopilot run --flow new-flow --dir app
+```
 
-Every question is a small menu: ↑/↓ (or `j`/`k`) to move, Enter to select, or press the shortcut key
-shown next to the option. The card disappears after you answer and leaves one ✔ line in the log.
-`EAS_AUTOPILOT_UI=gum` switches the menus to [gum](https://github.com/charmbracelet/gum) (experimental).
-- **Apple refused your device.** A newly registered device can stay in *Processing* at Apple for up
-  to 72 hours. Building now would leave it out and still use a build credit, so Enter stops the run
-  before anything is uploaded.
-- **Password, 2FA code, certificates, revoking, or any prompt it does not recognise.** You answer in
-  place, and automation resumes after Enter.
+The agent gets a readable transcript (each question, what was shown, the keys that answered it,
+the result line), the Flow format, and the existing Flow. It writes a Flow and runs `check` until it
+reports `green`: the Flow must send the same keys the human sent at every prompt, and must hand
+secret prompts back to the human. The Flow format is in [docs/flow-format.md](docs/flow-format.md).
 
-Keys you press while it is working are discarded, so a stray Enter cannot answer a prompt.
+## Recordings and history
 
-It also refuses to start on a dirty working tree. Changes that are whitespace-only (for example
-`Expo.plist` re-indented by a previous prebuild) are restored automatically.
+Everything lives in `~/.local/state/eas-autopilot/` (override with `EAS_AUTOPILOT_STATE`):
 
-## Run history
-
-Every run is recorded for tracing and later improvement:
-
-- `~/.local/state/eas-autopilot/runs.jsonl`: one JSON object per run with `tool_version`,
-  `eas_cli_version`, git branch and SHA, build URL and status, the result, decisions taken,
-  warnings, and every step with its duration in seconds.
-- `~/.local/state/eas-autopilot/runs/<id>/`: `eas.log` (raw EAS output), `events`, `meta.json`.
-- `~/.local/state/eas-autopilot/trust.tsv`: trusted Apple IDs and their expiry.
+- `runs/<id>/recording.jsonl`: a header, then timed frames: `out` (bytes from the command), `in`
+  (keys sent, tagged `human` or `flow`), and `mark` (prompts seen and done, rules fired, decisions,
+  steps). Secret prompts keep only the length of what was typed, and their echo is redacted. Files
+  are `0600`.
+- `runs/<id>/meta.json` and `runs.jsonl`: a summary derived from the recording: tool and eas-cli
+  versions, git SHA, result, build URL, decisions, and every step with its duration.
+- `memory.json`: remembered choices, such as a trusted Apple ID and when the trust expires.
+- `flows/`: Flows written by `learn`.
 
 ## Non-interactive alternative
 
-eas-cli 24.7+ has `eas build --non-interactive --refresh-ad-hoc-provisioning-profile`. It
-provisions every registered device with no prompts, but needs an App Store Connect API key for
-**every** target, extensions included. Use it when you have that; use `eas-autopilot` when you rely
-on an Apple ID session.
+eas-cli 24.7+ has `eas build --non-interactive --refresh-ad-hoc-provisioning-profile`, which
+provisions every registered device without prompts. It needs an App Store Connect API key for
+**every** target, extensions included.
 
 ## Tests
 
 ```bash
-./tests/run.sh
+npm test
 ```
 
-The tests drive the real tool against a mock built from eas-cli's own prompt code (`prompts`,
-the device picker and `ora` spinners), so no Apple account, EAS account or build credit is used.
-
-## Notes
-
-- macOS ships Tcl 8.5, which cannot represent emoji. The expect part runs in byte mode so UTF-8
-  passes through unchanged.
-- It matches eas-cli's prompt text. A new eas-cli release can reword a prompt; an unknown prompt is
-  handed to you rather than guessed.
+The tests drive the real runner and the real CLI in a pseudo-terminal against a mock built from
+eas-cli's own prompt code (`prompts`, the device picker, and `ora` spinners), so no Apple account,
+EAS account, or build credit is used. They cover the Flow, the pause before upload, secret
+redaction, and the record → learn → check loop.
 
 ## License
 

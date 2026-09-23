@@ -1,0 +1,168 @@
+{
+  "flow": 1,
+  "id": "eas-ios-adhoc",
+  "description": "eas build for iOS internal distribution: provision every registered device, confirm before upload.",
+  "command": ["npx", "eas-cli", "build", "--platform", "ios", "--profile", "{profile}", "--no-wait"],
+  "params": {
+    "profile": { "default": "preview" },
+    "udid": { "optional": true }
+  },
+  "secrets": ["[Pp]assword", "two-factor|2FA|verification code|security code"],
+  "hints": [
+    { "match": "Waking up", "text": "npx is starting eas-cli and evaluating the app config" },
+    { "match": "Fetching Apple devices", "text": "Apple's developer API lists every registered device, it is often slow" },
+    { "match": "ad hoc provisioning", "text": "Apple is rebuilding the profile with the new device list, 10-60 s per target" },
+    { "match": "Credentials for", "text": "every app target and extension needs its own provisioning profile" },
+    { "match": "Compressing", "text": "packing the project source for upload" },
+    { "match": "Uploading", "text": "sending the source archive to EAS" }
+  ],
+  "rules": [
+    {
+      "id": "environment",
+      "on": { "output": "Resolved \"([^\"]+)\" environment" },
+      "capture": { "environment": "Resolved \"([^\"]+)\"" },
+      "show": "🌱 Loaded {environment} environment",
+      "phase": "🔐 Loading Apple credentials"
+    },
+    {
+      "id": "credits",
+      "on": { "output": "You've used (\\d+%) of your included build credits" },
+      "capture": { "credits": "(\\d+%)" }
+    },
+    {
+      "id": "target",
+      "on": { "output": "Setting up credentials for target (\\S+)" },
+      "capture": { "target": "target (\\S+)" },
+      "phase": "🎯 Credentials for {target}"
+    },
+    {
+      "id": "apple-login",
+      "on": { "prompt": "^Do you want to log in to your Apple account\\?" },
+      "do": { "answer": "y" },
+      "show": "🍏 Apple login: yes"
+    },
+    {
+      "id": "apple-id",
+      "on": { "prompt": "^Apple ID:" },
+      "capture": { "email": "([\\w.+%-]+@[\\w.-]+)" },
+      "do": {
+        "choose": {
+          "icon": "🍏",
+          "title": "Use this Apple ID?",
+          "body": ["\u001b[1m{email}\u001b[0m"],
+          "remember": { "key": "apple-id:{email}", "days": 3, "then": "y", "show": "🍏 Apple ID {email} (trusted, {trusted_hours}h left)" },
+          "options": [
+            { "key": "y", "label": "Use it", "then": { "answer": "" }, "show": "🍏 Apple ID {email}" },
+            { "key": "t", "label": "Use it, trust for 3 days", "remember": true, "then": { "answer": "" }, "show": "🍏 Apple ID {email} (trusted for 3 days)" },
+            { "key": "n", "label": "Type another", "then": { "ask": "Type the Apple ID" } }
+          ]
+        }
+      }
+    },
+    {
+      "id": "apple-secret",
+      "on": { "prompt": "[Pp]assword|two-factor|2FA|verification code|security code" },
+      "do": { "ask": "Apple credential needed" }
+    },
+    {
+      "id": "choose-devices-again",
+      "on": { "prompt": "^Would you like to choose the devices to provision again\\?" },
+      "do": { "answer": "y" },
+      "show": "🔍 Profile is missing devices, choosing again"
+    },
+    {
+      "id": "select-devices",
+      "on": { "prompt": "^Select devices for the ad hoc build" },
+      "do": { "select-all": { "toggle": "a", "checked": "◉", "unchecked": "◯", "after": "Space to select", "tries": 4 } },
+      "capture_after": { "selected": "(\\d+) devices? selected" },
+      "collect": { "devices": "{target}: {selected}" },
+      "show": "📱 Selected all {selected} registered devices"
+    },
+    {
+      "id": "refused-devices",
+      "on": { "output": "Failed to provision \\d+ of the selected devices:[\\s\\S]*?Most commonly" },
+      "capture": { "failed": { "each": "^\\s*- (.+)$" } }
+    },
+    {
+      "id": "refused-target-device",
+      "on": { "prompt": "^Do you want to continue without provisioning these devices\\?" },
+      "when": { "var": "failed", "contains": "{udid}" },
+      "do": {
+        "choose": {
+          "tone": "bad",
+          "icon": "🍎",
+          "title": "Your device is not in this build",
+          "body": [
+            "Apple did not provision \u001b[1m{udid}\u001b[0m yet.",
+            "",
+            "{failed}",
+            "",
+            "\u001b[2mA new device can stay in Processing at Apple for up to 72 h.\u001b[0m",
+            "\u001b[2mBuilding now leaves it out and still uses a build credit.\u001b[0m"
+          ],
+          "options": [
+            {
+              "key": "n",
+              "label": "Stop, no build (recommended)",
+              "then": {
+                "exit": {
+                  "code": 3,
+                  "result": "device-not-provisioned-at-apple",
+                  "message": "Stopped before building: Apple has not accepted {udid} yet. Run again once it shows Enabled at https://developer.apple.com/account/resources/devices/list"
+                }
+              }
+            },
+            { "key": "y", "label": "Build without it", "then": { "answer": "" }, "show": "🍎 Building without {udid}" }
+          ]
+        }
+      }
+    },
+    {
+      "id": "refused-other-devices",
+      "on": { "prompt": "^Do you want to continue without provisioning these devices\\?" },
+      "when": { "var": "failed" },
+      "do": { "answer": "" },
+      "show": "🍎 Continuing without {failed.length} device(s) Apple has not accepted yet"
+    },
+    {
+      "id": "reuse-profile",
+      "on": { "prompt": "reuse the (original )?profile\\?" },
+      "do": { "answer": "y" },
+      "show": "♻️  Profile already has every device, reusing it"
+    },
+    {
+      "id": "build-link",
+      "on": { "output": "https://expo\\.dev/accounts/\\S+/builds/[0-9a-f-]+" },
+      "capture": { "build_url": "(https://expo\\.dev/accounts/\\S+/builds/[0-9a-f-]+)" },
+      "show": "🎟️  Build queued"
+    },
+    {
+      "id": "confirm-upload",
+      "on": { "output": "Compressing project files|Uploading to EAS Build" },
+      "once": true,
+      "skip_if": { "param": "yes" },
+      "do": {
+        "choose": {
+          "pause": true,
+          "icon": "🧾",
+          "title": "Ready to build",
+          "body": [
+            "\u001b[2mEAS is paused. Nothing is uploaded and no build exists yet.\u001b[0m",
+            "",
+            "profile   \u001b[1m{profile}\u001b[0m",
+            { "text": "source    {git}", "when": { "var": "git" } },
+            { "text": "devices   {devices}", "when": { "var": "devices" } },
+            { "text": "\u001b[33m⚠ Apple refused {failed.length} device(s), they cannot install this build\u001b[0m", "when": { "var": "failed" } },
+            { "text": "\u001b[31m✘ {udid} is not in this build\u001b[0m", "when": { "var": "failed", "contains": "{udid}" } },
+            { "text": "\u001b[32m✔\u001b[0m {udid} is in this build", "when": { "all": [{ "var": "udid" }, { "var": "failed", "lacks": "{udid}" }] } },
+            { "text": "💳 {credits} of included build credits used", "when": { "var": "credits" } }
+          ],
+          "options": [
+            { "key": "y", "label": "Start the build", "then": "continue", "show": "🧾 Build confirmed" },
+            { "key": "n", "label": "Cancel, nothing is built", "then": { "exit": { "code": 4, "result": "cancelled", "message": "Cancelled before upload. No build was created." } } }
+          ]
+        }
+      }
+    }
+  ]
+}
