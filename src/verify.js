@@ -3,7 +3,7 @@ import { mkdtempSync, readdirSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const eas = (dir, args) => JSON.parse(execFileSync("npx", ["eas-cli", ...args, "--json", "--non-interactive"], { cwd: dir, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }));
+const eas = (dir, args) => JSON.parse(execFileSync("npx", ["eas-cli", ...args, "--json"], { cwd: dir, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }));
 
 export async function followBuild(dir, buildId, onStatus) {
   let last = "";
