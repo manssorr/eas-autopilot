@@ -41,6 +41,13 @@ ln -s "$PWD/bin/eas-autopilot.js" ~/.local/bin/eas-autopilot
 `--udid <UDID>` (confirm the device is in the build, then wait for the build and check the IPA),
 `--wait`, `--yes` (skip the final confirmation), `--no-follow`.
 
+## Other shipped Flows
+
+- `eas-ios-credentials`: `eas credentials -p ios` for one profile (`--profile`, default `preview`): Apple login, Build Credentials, then "All: Set up all the required credentials", reuse the distribution certificate, regenerate profiles with the registered devices, then exit.
+- `eas-ios-device-add`: `eas device:create` with the Input method for one UDID (`--udid`, `--name`). It also registers devices the Developer Portal import leaves out, such as an Apple Watch.
+
+Both need the project's Expo token in `EXPO_TOKEN` when your `eas` command is a shell wrapper, because the Flow runs `npx eas-cli`.
+
 ## The eas-ios-adhoc Flow
 
 It is built for adding a tester's iPhone to an internal build.
