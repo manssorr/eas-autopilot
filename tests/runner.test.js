@@ -378,3 +378,13 @@ test("replay keeps the answer to an unmarked multi-line prompt whose header span
   ];
   assert.deepEqual(replaySteps(frames).filter(s => s.k === "in").map(s => s.d), ["y\r"]);
 });
+
+test("replay detects a header longer than the scan window, and consumes every header in a frame", () => {
+  const out = d => ({ k: "out", d });
+  const header = q => `\x1b[36m?\x1b[39m \x1b[1m${q}\x1b[22m \x1b[90m›\x1b[39m (Y/n)\r\n`;
+  const long = `\x1b[36m?\x1b[39m \x1b[1mReuse this certificate?\r\n${"Cert detail line\r\n".repeat(400)}\x1b[22m \x1b[90m›\x1b[39m (Y/n)`;
+  const kept = frames => replaySteps(frames).filter(s => s.k === "in").map(s => s.d);
+  assert.deepEqual(kept([out(long), { k: "in", by: "human", d: "y\r" }]), ["y\r"]);
+  const stale = [out(header("A?") + header("B?") + header("C?") + "\x1b[32m✔\x1b[39m \x1b[1mC?\x1b[22m … yes\r\n"), out("plain output\r\n"), { k: "in", by: "human", d: "z" }];
+  assert.deepEqual(kept(stale), []);
+});

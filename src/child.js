@@ -175,12 +175,17 @@ export function replaySteps(frames) {
     if (frame.k === "out") {
       const text = strip(frame.d);
       // A header can span output frames, so look for it in the output since the last one.
-      seen = (seen + frame.d).slice(-4000);
+      seen += frame.d;
       PROMPT_HEADER.lastIndex = 0;
-      if (PROMPT_HEADER.test(seen)) {
+      let end = 0;
+      while (PROMPT_HEADER.exec(seen)) {
         shown = true;
-        seen = seen.slice(PROMPT_HEADER.lastIndex);
+        end = PROMPT_HEADER.lastIndex;
       }
+      // Keep only what may still become a header: an unfinished one, or a split escape sequence.
+      const rest = seen.slice(end);
+      const start = rest.lastIndexOf("\x1b[36m?");
+      seen = start >= 0 ? rest.slice(start) : rest.slice(-8);
       if (/[✔✖]/.test(text)) shown = false;
       if (/Press any key/i.test(text)) anyKey = true;
       steps.push(frame);
