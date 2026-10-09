@@ -28,6 +28,7 @@ A Flow is one JSON file. Rules are tried in order; the first rule whose `on` mat
 | Action | Effect |
 | --- | --- |
 | `{"answer": "y"}` | types the text, then Enter. `{"answer": ""}` is a bare Enter (accept the default). |
+| `{"menu": "<regex>"}` or `{"menu": ["<regex>", ...]}` | arrow-key list: moves the cursor to the first item whose text matches, then Enter. A list is a path: each time the rule fires it uses the next regex (the last one repeats), so one rule can walk a nested menu. `{param}` values are inserted into the regex. Falls back to `ask` when nothing matches. |
 | `{"select-all": {"toggle": "a", "checked": "◉", "unchecked": "◯", "after": "Space to select", "tries": 4}}` | multiselect: presses `toggle` until no visible item shows `unchecked`, then Enter. Falls back to `ask`. |
 | `{"ask": "why"}` | hands the prompt to the human, who answers in the command's own screen. |
 | `{"choose": {…}}` | shows a menu to the human and runs the chosen option's `then`. |
@@ -73,6 +74,14 @@ A Flow is one JSON file. Rules are tried in order; the first rule whose `on` mat
 - `show`: a ✔ line printed after the rule completes.
 - `phase`: sets the live spinner label.
 - `hints`: explanation shown when a spinner label containing `match` runs longer than 10 s.
+
+## Check
+
+`eas-autopilot check <flow> <run> [--profile p] [--udid u]` replays the recording. The params of a
+recorded `record` run are empty, so pass the ones the human's keys depended on (`--profile`).
+Replay ignores keys the command rejected with a bell, collapses arrow-key wandering in a list to its
+net movement, and expects Enter at "Press any key". Enter alone answers a `(Y/n)` prompt, so use
+`{"answer": ""}` where the human accepted the default.
 
 ## Secrets
 

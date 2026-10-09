@@ -1,4 +1,5 @@
 import pty from "node-pty";
+import { PROMPT_HEADER, strip } from "./ansi.js";
 
 export function createPtyChild(command, { cwd, cols = 120, rows = 40, env = process.env } = {}) {
   const proc = pty.spawn(command[0], command.slice(1), { name: "xterm-256color", cols, rows, cwd, env });
@@ -64,14 +65,7 @@ export class ReplayDivergence extends Error {
 }
 
 export function createReplayChild(frames) {
-  const steps = [];
-  let insidePrompt = false;
-  for (const frame of frames) {
-    if (frame.k === "mark" && frame.name === "prompt.seen") insidePrompt = true;
-    if (frame.k === "mark" && frame.name === "prompt.done") insidePrompt = false;
-    if (frame.k === "out") steps.push(frame);
-    if (frame.k === "in" && insidePrompt) steps.push(frame);
-  }
+  const steps = replaySteps(frames);
   const end = frames.find(frame => frame.k === "mark" && frame.name === "run.end");
   const listeners = [];
   const exitWaiters = [];
@@ -161,4 +155,65 @@ export function createReplayChild(frames) {
     peekExpected: () => (index < steps.length && steps[index].k === "in" ? (steps[index].secret ? null : expectedRun()) : ""),
     divergence: () => divergence,
   };
+}
+
+// The keys a replay expects. Besides the marked prompts, this includes keys typed at a prompt the
+// recording did not mark (a question that continues on dim lines) and at "Press any key". Keys the
+// command rejected with a bell are dropped, and arrow-key wandering in a list collapses to its net
+// movement, because the flow moves straight to the item it wants.
+export function replaySteps(frames) {
+  const ARROW = /^\x1b\[[AB]$/;
+  const steps = [];
+  let marked = false;
+  let shown = false;
+  let anyKey = false;
+  let seen = "";
+  for (let i = 0; i < frames.length; i++) {
+    const frame = frames[i];
+    if (frame.k === "mark" && frame.name === "prompt.seen") marked = true;
+    if (frame.k === "mark" && frame.name === "prompt.done") marked = false;
+    if (frame.k === "out") {
+      const text = strip(frame.d);
+      // A header can span output frames, so look for it in the output since the last one.
+      seen += frame.d;
+      PROMPT_HEADER.lastIndex = 0;
+      let end = 0;
+      while (PROMPT_HEADER.exec(seen)) {
+        shown = true;
+        end = PROMPT_HEADER.lastIndex;
+      }
+      // Keep only what may still become a header: an unfinished one, or a split escape sequence.
+      const rest = seen.slice(end);
+      const start = rest.lastIndexOf("\x1b[36m?");
+      seen = start >= 0 ? rest.slice(start) : rest.slice(-8);
+      if (/[✔✖]/.test(text)) shown = false;
+      if (/Press any key/i.test(text)) anyKey = true;
+      steps.push(frame);
+      continue;
+    }
+    if (frame.k !== "in" || !(marked || shown || anyKey)) continue;
+    anyKey = false;
+    const next = frames[i + 1];
+    if (next?.k === "out" && next.d === "\x07") {
+      i++;
+      continue;
+    }
+    steps.push(frame);
+  }
+  const result = [];
+  for (let i = 0; i < steps.length; i++) {
+    if (!(steps[i].k === "in" && ARROW.test(steps[i].d))) {
+      result.push(steps[i]);
+      continue;
+    }
+    let net = 0;
+    let j = i;
+    while (j < steps.length && (steps[j].k === "out" || ARROW.test(steps[j].d))) {
+      if (steps[j].k === "in") net += steps[j].d.endsWith("B") ? 1 : -1;
+      j++;
+    }
+    if (net !== 0) result.push({ ...steps[i], d: (net > 0 ? "\x1b[B" : "\x1b[A").repeat(Math.abs(net)) });
+    i = j - 1;
+  }
+  return result;
 }

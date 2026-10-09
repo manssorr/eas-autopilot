@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { PROMPT_HEADER, strip, visibleKeys } from "./ansi.js";
+import { PROMPT_HEADER, questionOf, strip, visibleKeys } from "./ansi.js";
 
 const DOCS = join(dirname(fileURLToPath(import.meta.url)), "..", "docs", "flow-format.md");
 
@@ -30,7 +30,7 @@ export function transcript(frames) {
       PROMPT_HEADER.lastIndex = 0;
       let header = null;
       let match;
-      while ((match = PROMPT_HEADER.exec(raw))) if (match[1].trim() === frame.q) header = match;
+      while ((match = PROMPT_HEADER.exec(raw))) if (questionOf(match[1]) === frame.q) header = match;
       current = { q: frame.q, rest: header ? strip(header[2]).trim() : "", start: header?.index ?? raw.length, keys: [], t: frame.t };
     }
     if (frame.k === "in" && current) {

@@ -244,7 +244,7 @@ async function commandCheck(args) {
         }
       });
   }
-  const report = await checkFlow(flow, dirs);
+  const report = await checkFlow(flow, dirs, Object.fromEntries(["profile", "udid"].filter(name => args[name]).map(name => [name, String(args[name])])));
   for (const problem of report.problems) process.stdout.write(`  ✘ ${problem}\n`);
   for (const r of report.runs) {
     const id = r.dir.split("/").at(-1);

@@ -1,4 +1,4 @@
-import { PROMPT_HEADER, escapeRegExp, strip } from "./ansi.js";
+import { PROMPT_HEADER, escapeRegExp, questionOf, strip } from "./ansi.js";
 import { capture, interpolate, renderLines, test } from "./flow.js";
 
 const DEFAULT_SECRETS = ["password|passcode|passphrase|two-factor|2FA|\\bcode\\b|token"];
@@ -14,6 +14,7 @@ export async function run({ flow, params = {}, child, presenter, recorder, memor
   const outputCursor = new Map();
   const fired = new Set();
   const runChoices = new Map();
+  const menuUses = new Map();
 
   let raw = "";
   let plain = "";
@@ -96,17 +97,24 @@ export async function run({ flow, params = {}, child, presenter, recorder, memor
     });
   };
 
-  const offsets = [[0, 0]];
+  // The exact plain-text offset of a raw index. Headers are scanned in order and each starts on an
+  // escape sequence, so strip() of the slice since the last lookup adds up to the plain offset.
+  let mark = { raw: 0, plain: 0 };
   const plainAt = rawIndex => {
-    let best = 0;
-    for (const [rawEnd, plainStart] of offsets) if (rawEnd <= rawIndex) best = plainStart;
-    return best;
+    if (rawIndex < mark.raw) mark = { raw: 0, plain: 0 };
+    mark = { raw: rawIndex, plain: mark.plain + strip(raw.slice(mark.raw, rawIndex)).length };
+    return mark.plain;
   };
 
   const answered = prompt => {
     const pattern = new RegExp(`(✔|✖)[^\\r\\n]*${escapeRegExp(prompt.q)}`);
     return pattern.test(plain.slice(prompt.plainStart));
   };
+
+  // Is the prompt's own completion line printed before this point? Then a header with the same
+  // question is a new prompt, not a redraw of the active one.
+  const answeredBefore = (prompt, plainEnd) =>
+    new RegExp(`(✔|✖)[^\\r\\n]*${escapeRegExp(prompt.q)}`).test(plain.slice(prompt.plainStart, plainEnd));
 
   const waitAnswered = (prompt, timeoutMs = ANSWER_TIMEOUT_MS) =>
     new Promise(resolve => {
@@ -129,8 +137,8 @@ export async function run({ flow, params = {}, child, presenter, recorder, memor
         return;
       }
       headerCursor = PROMPT_HEADER.lastIndex;
-      const prompt = { q: match[1].trim(), rest: strip(match[2]), rawStart: match.index, plainStart: plainAt(match.index) };
-      if (active && active.q === prompt.q) continue;
+      const prompt = { q: questionOf(match[1]), rest: strip(match[2]), rawStart: match.index, plainStart: plainAt(match.index) };
+      if (active && active.q === prompt.q && !answeredBefore(active, prompt.plainStart)) continue;
       if (active) {
         pending = prompt;
         continue;
@@ -212,6 +220,34 @@ export async function run({ flow, params = {}, child, presenter, recorder, memor
     await ask(prompt, `could not confirm every item is selected: press ${toggle} until all show ${checked}, then Enter`);
   };
 
+  // Arrow-key list: move the cursor to the item that matches the next regex of the path, press Enter.
+  // The rule's path advances each time the rule fires, so one rule can walk a nested menu.
+  const menu = async (spec, rule, prompt) => {
+    const path = Array.isArray(spec) ? spec : [spec];
+    const used = menuUses.get(rule) ?? 0;
+    menuUses.set(rule, used + 1);
+    const pick = interpolate(path[Math.min(used, path.length - 1)], vars, escapeRegExp);
+    await child.settled(300);
+    const from = plain.lastIndexOf(prompt.q);
+    const lines = plain.slice(Math.max(from, prompt.plainStart)).split(/[\r\n]+/).slice(1);
+    const items = [];
+    for (const line of lines) {
+      if (!/^(❯|\s{2,})\s*\S/.test(line)) break;
+      items.push({ text: line.replace(/^(❯|\s)\s*/, "").trim(), cursor: line.startsWith("❯") });
+    }
+    const target = items.findIndex(item => new RegExp(pick).test(item.text));
+    const cursor = items.findIndex(item => item.cursor);
+    if (target < 0 || cursor < 0) {
+      return ask(prompt, `no menu item matches /${pick}/: choose it yourself`);
+    }
+    const key = target > cursor ? "\x1b[B" : "\x1b[A";
+    for (let i = 0; i < Math.abs(target - cursor); i++) {
+      send(key);
+      await child.settled(300);
+    }
+    send("\r");
+  };
+
   const choose = async (spec, rule, prompt) => {
     const title = interpolate(spec.title, vars);
     const remember = spec.remember;
@@ -261,6 +297,7 @@ export async function run({ flow, params = {}, child, presenter, recorder, memor
     if (finished || !action || action === "continue") return;
     if (action.answer !== undefined) return send(interpolate(action.answer, vars) + "\r");
     if (action.ask !== undefined) return ask(prompt ?? { q: "", rawStart: raw.length, plainStart: plain.length }, interpolate(action.ask, vars));
+    if (action.menu !== undefined) return menu(action.menu, rule, prompt);
     if (action["select-all"]) return selectAll(action["select-all"], prompt);
     if (action.choose) return choose(action.choose, rule, prompt);
     if (action.exit) {
@@ -281,7 +318,6 @@ export async function run({ flow, params = {}, child, presenter, recorder, memor
     const text = carry + data;
     const partial = text.match(/\x1b(\[[0-9;?<>=]*[ -/]*|\][^\x07]*|)$/);
     carry = partial ? partial[0] : "";
-    offsets.push([raw.length - carry.length, plain.length]);
     plain += strip(partial ? text.slice(0, partial.index) : text);
     scan(false);
   });

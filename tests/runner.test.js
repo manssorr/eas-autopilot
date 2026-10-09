@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { before, test } from "node:test";
-import { createPtyChild, createReplayChild } from "../src/child.js";
+import { createPtyChild, createReplayChild, replaySteps } from "../src/child.js";
 import { loadFlow } from "../src/flow.js";
 import { createMemory } from "../src/memory.js";
 import { headlessPresenter } from "../src/presenter.js";
@@ -251,4 +251,140 @@ test("no registered devices: stop with the fix, nothing is built", async () => {
   assert.equal(outcome.exit, 6);
   assert.equal(outcome.result, "no-registered-devices");
   assert.doesNotMatch(mock.read(), /^uploaded$/m);
+});
+
+test("menu action walks an arrow-key list; replay collapses the human's wandering and ignores rejected keys", async () => {
+  const menuRender = cursor =>
+    "\x1b[36m?\x1b[39m \x1b[1mWhich profile?\x1b[22m \x1b[90m›\x1b[39m \x1b[90m- Use arrow-keys.\x1b[39m\r\n" +
+    ["base", "preview", "production"].map((name, i) => (i === cursor ? `\x1b[36m❯\x1b[39m   ${name}\r\n` : `    ${name}\r\n`)).join("");
+  const certQuestion =
+    "\x1b[36m?\x1b[39m \x1b[1mReuse this certificate?\r\nCert ID: X\x1b[90m\x1b[39m\r\n\x1b[90m    Used by: app\x1b[39m\x1b[22m \x1b[90m›\x1b[39m \x1b[90m(Y/n)\x1b[39m";
+  const out = d => ({ k: "out", d });
+  const key = d => ({ k: "in", by: "human", d });
+  const frames = [
+    { k: "header", params: {} },
+    out(menuRender(0)),
+    { k: "mark", name: "prompt.seen", q: "Which profile?" },
+    key("\x1b[B"), out(menuRender(1)), key("\x1b[B"), out(menuRender(2)), key("\x1b[A"), out(menuRender(1)), key("\x1b[B"), out(menuRender(2)),
+    key("\r"),
+    out("\x1b[32m✔\x1b[39m \x1b[1mWhich profile?\x1b[22m \x1b[90m›\x1b[39m production\r\n"),
+    { k: "mark", name: "prompt.done", q: "Which profile?" },
+    out(certQuestion),
+    key("a"), out("\x07"), key("\r"),
+    out("\x1b[32m✔\x1b[39m \x1b[1mReuse this certificate?\r\nCert ID: X\x1b[90m\x1b[39m\x1b[22m \x1b[90m…\x1b[39m yes\r\n"),
+    out("Press any key to continue...\r\n"),
+    key("\r"),
+    out("done\r\n"),
+    { k: "mark", name: "run.end", data: { child_code: 0 } },
+  ];
+  const menuFlow = {
+    flow: 1,
+    id: "menu-test",
+    command: ["x"],
+    params: { profile: { default: "preview" } },
+    rules: [
+      { id: "profile", on: { prompt: "^Which profile\\?" }, do: { menu: "^{profile}$" } },
+      { id: "cert", on: { prompt: "^Reuse this certificate\\?" }, do: { answer: "" } },
+      { id: "any-key", on: { output: "Press any key" }, do: { answer: "" } },
+    ],
+  };
+  const dir = join(mockEnv().work, "menu-run");
+  const recorder = createRecorder(dir, { id: "seed" });
+  for (const frame of frames) if (frame.k !== "header" && frame.k !== "mark") recorder[frame.k](frame.d, frame.by);
+  recorder.close({});
+  // Replay straight from the hand-built frames, so the marks above are the ones the recorder would write.
+  const replay = createReplayChild(frames);
+  const check = createRecorder(join(mockEnv().work, "menu-replay"), { id: "replay" });
+  const outcome = await run({ flow: menuFlow, params: { profile: "production" }, child: replay, presenter: headlessPresenter(), recorder: check, memory: createMemory(join(mockEnv().work, "m.json")) });
+  check.close({});
+  assert.equal(outcome.divergence, null, outcome.divergence?.message);
+  assert.deepEqual(menuFlow.rules.length, 3);
+  assert.equal(
+    (await checkFlow({ ...menuFlow, rules: [{ ...menuFlow.rules[0], do: { menu: ["^base$"] } }, ...menuFlow.rules.slice(1)] }, [dir], { profile: "production" })).green,
+    false,
+    "picking a different item must diverge",
+  );
+});
+
+test("menu parameter values are matched literally, not as a regex", async () => {
+  const listeners = [];
+  const sent = [];
+  let resolveExit;
+  const exited = new Promise(resolve => (resolveExit = resolve));
+  const emit = data => listeners.forEach(fn => fn(data));
+  const menuFlow = {
+    flow: 1,
+    id: "escape-test",
+    command: ["x"],
+    params: { profile: { default: "preview.1" } },
+    rules: [{ id: "profile", on: { prompt: "^Which profile\\?" }, do: { menu: "^{profile}$" } }],
+  };
+  const child = {
+    write: data => {
+      sent.push(data);
+      if (data === "\r") setTimeout(() => resolveExit({ code: 0 }), 50);
+    },
+    onData: fn => listeners.push(fn),
+    settled: async () => {},
+    pause() {}, resume() {}, interrupt() {}, kill() {},
+    wait: () => exited,
+  };
+  const recorder = createRecorder(join(mockEnv().work, "escape"), { id: "escape" });
+  const running = run({ flow: menuFlow, child, presenter: headlessPresenter({ ask: () => "\r" }), recorder, memory: createMemory(join(mockEnv().work, "m.json")) });
+  emit(
+    "\x1b[36m?\x1b[39m \x1b[1mWhich profile?\x1b[22m \x1b[90m›\x1b[39m \x1b[90m- Use arrow-keys.\x1b[39m\r\n" +
+      "\x1b[36m❯\x1b[39m   previewX1\r\n    preview.1\r\n",
+  );
+  await running;
+  recorder.close({});
+  assert.deepEqual(sent, ["\x1b[B", "\r"]);
+});
+
+test("a completion line and a repeated identical question in one chunk are both answered", async () => {
+  const listeners = [];
+  const sent = [];
+  let resolveExit;
+  const exited = new Promise(resolve => (resolveExit = resolve));
+  const emit = data => listeners.forEach(fn => fn(data));
+  const q = "Do you want to log in to your Apple account?";
+  const header = `\x1b[36m?\x1b[39m \x1b[1m${q}\x1b[22m \x1b[90m›\x1b[39m (Y/n)\r\n`;
+  const done = `\x1b[2K\x1b[G\x1b[32m✔\x1b[39m \x1b[1m${q}\x1b[22m … yes\r\n`;
+  const child = {
+    write: data => {
+      sent.push(data);
+      if (sent.length === 2) setTimeout(() => resolveExit({ code: 0 }), 50);
+    },
+    onData: fn => listeners.push(fn),
+    settled: async () => {},
+    pause() {}, resume() {}, interrupt() {}, kill() {},
+    wait: () => exited,
+  };
+  const recorder = createRecorder(join(mockEnv().work, "repeat"), { id: "repeat" });
+  const running = run({ flow, child, presenter: headlessPresenter(), recorder, memory: createMemory(join(mockEnv().work, "m.json")) });
+  emit(header + done + header);
+  const outcome = await running;
+  recorder.close({});
+  assert.deepEqual(sent, ["y\r", "y\r"]);
+  assert.equal(outcome.exit, 0);
+});
+
+test("replay keeps the answer to an unmarked multi-line prompt whose header spans output frames", () => {
+  const out = d => ({ k: "out", d });
+  const frames = [
+    out("\x1b[36m?\x1b[39m \x1b[1mReuse this certificate?\r\nCert ID"),
+    out(": X\x1b[90m\x1b[39m\x1b[22m \x1b[90m›\x1b[39m (Y/n)"),
+    { k: "in", by: "human", d: "y\r" },
+    out("\x1b[32m✔\x1b[39m \x1b[1mReuse this certificate?\x1b[22m … yes\r\n"),
+  ];
+  assert.deepEqual(replaySteps(frames).filter(s => s.k === "in").map(s => s.d), ["y\r"]);
+});
+
+test("replay detects a header longer than the scan window, and consumes every header in a frame", () => {
+  const out = d => ({ k: "out", d });
+  const header = q => `\x1b[36m?\x1b[39m \x1b[1m${q}\x1b[22m \x1b[90m›\x1b[39m (Y/n)\r\n`;
+  const long = `\x1b[36m?\x1b[39m \x1b[1mReuse this certificate?\r\n${"Cert detail line\r\n".repeat(400)}\x1b[22m \x1b[90m›\x1b[39m (Y/n)`;
+  const kept = frames => replaySteps(frames).filter(s => s.k === "in").map(s => s.d);
+  assert.deepEqual(kept([out(long), { k: "in", by: "human", d: "y\r" }]), ["y\r"]);
+  const stale = [out(header("A?") + header("B?") + header("C?") + "\x1b[32m✔\x1b[39m \x1b[1mC?\x1b[22m … yes\r\n"), out("plain output\r\n"), { k: "in", by: "human", d: "z" }];
+  assert.deepEqual(kept(stale), []);
 });

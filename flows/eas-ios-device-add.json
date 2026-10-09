@@ -1,0 +1,26 @@
+{
+  "flow": 1,
+  "id": "eas-ios-device-add",
+  "description": "eas device:create with the Input method: registers one UDID (any Apple device class, including a watch the Developer Portal import leaves out) under the project's Expo account. Needs EXPO_TOKEN in the caller's environment: the eas zsh wrapper is bypassed by npx.",
+  "command": ["npx", "eas-cli", "device:create"],
+  "params": {
+    "udid": {},
+    "name": { "default": "Device" }
+  },
+  "secrets": ["[Pp]assword", "two-factor|2FA|[Cc]ode\\b"],
+  "hints": [
+    { "match": "Waking up", "text": "npx is starting eas-cli. If it stalls on a login, EXPO_TOKEN is missing" },
+    { "match": "Fetching Apple", "text": "Apple's developer API lists every registered device, it is often slow" }
+  ],
+  "rules": [
+    { "id": "use-account", "on": { "prompt": "Would you like to use the .* account\\?" }, "do": { "answer": "y" }, "show": "👤 Project Expo account" },
+    { "id": "apple-login", "on": { "prompt": "^Do you want to log in to your Apple account\\?" }, "do": { "answer": "" }, "show": "🍏 Apple login: yes" },
+    { "id": "apple-id", "on": { "prompt": "^Apple ID:" }, "do": { "answer": "" }, "show": "🍏 Apple ID: default" },
+    { "id": "method", "on": { "prompt": "^How would you like to register your devices\\?" }, "do": { "menu": "^Input" }, "show": "⌨️ Input method" },
+    { "id": "udid", "on": { "prompt": "^UDID:" }, "do": { "answer": "{udid}" }, "show": "🔢 UDID {udid}" },
+    { "id": "device-name", "on": { "prompt": "^Device name" }, "do": { "answer": "{name}" }, "show": "🏷 Name {name}" },
+    { "id": "device-class", "on": { "prompt": "^Device class" }, "do": { "menu": "^Not sure" }, "show": "❔ Class: not set" },
+    { "id": "confirm", "on": { "prompt": "^Is this what you want to register\\?" }, "do": { "answer": "y" }, "show": "✅ Register" },
+    { "id": "another", "on": { "prompt": "^Do you want to register another device\\?" }, "do": { "answer": "n" }, "show": "No more devices" }
+  ]
+}

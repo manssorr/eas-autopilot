@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 
-export const ACTIONS = ["answer", "ask", "select-all", "choose", "exit"];
+export const ACTIONS = ["answer", "ask", "menu", "select-all", "choose", "exit"];
 
 export function loadFlow(path) {
   const flow = JSON.parse(readFileSync(path, "utf8"));
@@ -54,6 +54,17 @@ function validateAction(action, where, problems) {
     problems.push(`${where}: action must be one of ${ACTIONS.join(", ")} or "continue", got ${JSON.stringify(action)}`);
     return;
   }
+  if (action.menu !== undefined) {
+    const path = Array.isArray(action.menu) ? action.menu : [action.menu];
+    if (path.length === 0 || path.some(item => typeof item !== "string")) problems.push(`${where}: menu needs a regex string or a list of them`);
+    for (const item of path) {
+      try {
+        new RegExp(String(item).replace(/\{[\w.]+\}/g, "x"));
+      } catch (error) {
+        problems.push(`${where}: bad menu regex ${JSON.stringify(item)} (${error.message})`);
+      }
+    }
+  }
   if (action.exit !== undefined && typeof action.exit !== "object") problems.push(`${where}: exit needs {"code", "result"}`);
   if (action.choose) {
     const options = action.choose.options ?? [];
@@ -65,13 +76,13 @@ function validateAction(action, where, problems) {
   }
 }
 
-export function interpolate(template, vars) {
+export function interpolate(template, vars, format = text => text) {
   return String(template).replace(/\{([\w.]+)\}/g, (_, name) => {
     const [base, prop] = name.split(".");
     const value = vars[base];
     if (prop === "length") return Array.isArray(value) ? String(value.length) : value ? "1" : "0";
-    if (Array.isArray(value)) return value.join(", ");
-    return value === undefined || value === null ? "" : String(value);
+    if (Array.isArray(value)) return format(value.join(", "));
+    return value === undefined || value === null ? "" : format(String(value));
   });
 }
 
