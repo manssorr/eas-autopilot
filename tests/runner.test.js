@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { before, test } from "node:test";
-import { createPtyChild, createReplayChild } from "../src/child.js";
+import { createPtyChild, createReplayChild, replaySteps } from "../src/child.js";
 import { loadFlow } from "../src/flow.js";
 import { createMemory } from "../src/memory.js";
 import { headlessPresenter } from "../src/presenter.js";
@@ -366,4 +366,15 @@ test("a completion line and a repeated identical question in one chunk are both 
   recorder.close({});
   assert.deepEqual(sent, ["y\r", "y\r"]);
   assert.equal(outcome.exit, 0);
+});
+
+test("replay keeps the answer to an unmarked multi-line prompt whose header spans output frames", () => {
+  const out = d => ({ k: "out", d });
+  const frames = [
+    out("\x1b[36m?\x1b[39m \x1b[1mReuse this certificate?\r\nCert ID"),
+    out(": X\x1b[90m\x1b[39m\x1b[22m \x1b[90m›\x1b[39m (Y/n)"),
+    { k: "in", by: "human", d: "y\r" },
+    out("\x1b[32m✔\x1b[39m \x1b[1mReuse this certificate?\x1b[22m … yes\r\n"),
+  ];
+  assert.deepEqual(replaySteps(frames).filter(s => s.k === "in").map(s => s.d), ["y\r"]);
 });

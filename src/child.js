@@ -167,14 +167,20 @@ export function replaySteps(frames) {
   let marked = false;
   let shown = false;
   let anyKey = false;
+  let seen = "";
   for (let i = 0; i < frames.length; i++) {
     const frame = frames[i];
     if (frame.k === "mark" && frame.name === "prompt.seen") marked = true;
     if (frame.k === "mark" && frame.name === "prompt.done") marked = false;
     if (frame.k === "out") {
       const text = strip(frame.d);
+      // A header can span output frames, so look for it in the output since the last one.
+      seen = (seen + frame.d).slice(-4000);
       PROMPT_HEADER.lastIndex = 0;
-      if (PROMPT_HEADER.test(frame.d)) shown = true;
+      if (PROMPT_HEADER.test(seen)) {
+        shown = true;
+        seen = seen.slice(PROMPT_HEADER.lastIndex);
+      }
       if (/[✔✖]/.test(text)) shown = false;
       if (/Press any key/i.test(text)) anyKey = true;
       steps.push(frame);
