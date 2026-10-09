@@ -339,3 +339,31 @@ test("menu parameter values are matched literally, not as a regex", async () => 
   recorder.close({});
   assert.deepEqual(sent, ["\x1b[B", "\r"]);
 });
+
+test("a completion line and a repeated identical question in one chunk are both answered", async () => {
+  const listeners = [];
+  const sent = [];
+  let resolveExit;
+  const exited = new Promise(resolve => (resolveExit = resolve));
+  const emit = data => listeners.forEach(fn => fn(data));
+  const q = "Do you want to log in to your Apple account?";
+  const header = `\x1b[36m?\x1b[39m \x1b[1m${q}\x1b[22m \x1b[90m›\x1b[39m (Y/n)\r\n`;
+  const done = `\x1b[2K\x1b[G\x1b[32m✔\x1b[39m \x1b[1m${q}\x1b[22m … yes\r\n`;
+  const child = {
+    write: data => {
+      sent.push(data);
+      if (sent.length === 2) setTimeout(() => resolveExit({ code: 0 }), 50);
+    },
+    onData: fn => listeners.push(fn),
+    settled: async () => {},
+    pause() {}, resume() {}, interrupt() {}, kill() {},
+    wait: () => exited,
+  };
+  const recorder = createRecorder(join(mockEnv().work, "repeat"), { id: "repeat" });
+  const running = run({ flow, child, presenter: headlessPresenter(), recorder, memory: createMemory(join(mockEnv().work, "m.json")) });
+  emit(header + done + header);
+  const outcome = await running;
+  recorder.close({});
+  assert.deepEqual(sent, ["y\r", "y\r"]);
+  assert.equal(outcome.exit, 0);
+});

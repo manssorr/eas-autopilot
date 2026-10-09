@@ -97,11 +97,13 @@ export async function run({ flow, params = {}, child, presenter, recorder, memor
     });
   };
 
-  const offsets = [[0, 0]];
+  // The exact plain-text offset of a raw index. Headers are scanned in order and each starts on an
+  // escape sequence, so strip() of the slice since the last lookup adds up to the plain offset.
+  let mark = { raw: 0, plain: 0 };
   const plainAt = rawIndex => {
-    let best = 0;
-    for (const [rawEnd, plainStart] of offsets) if (rawEnd <= rawIndex) best = plainStart;
-    return best;
+    if (rawIndex < mark.raw) mark = { raw: 0, plain: 0 };
+    mark = { raw: rawIndex, plain: mark.plain + strip(raw.slice(mark.raw, rawIndex)).length };
+    return mark.plain;
   };
 
   const answered = prompt => {
@@ -316,7 +318,6 @@ export async function run({ flow, params = {}, child, presenter, recorder, memor
     const text = carry + data;
     const partial = text.match(/\x1b(\[[0-9;?<>=]*[ -/]*|\][^\x07]*|)$/);
     carry = partial ? partial[0] : "";
-    offsets.push([raw.length - carry.length, plain.length]);
     plain += strip(partial ? text.slice(0, partial.index) : text);
     scan(false);
   });
