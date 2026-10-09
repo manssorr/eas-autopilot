@@ -9,7 +9,7 @@ export function strip(text) {
 
 // The question may continue on dim lines (eas-cli prints certificate details that way), so dim
 // and reset sequences are allowed inside it. Use questionOf() to get the first line.
-export const PROMPT_HEADER = /\x1b\[36m\?\x1b\[39m \x1b\[1m((?:[^\x1b]|\x1b\[90m|\x1b\[39m)+?)\x1b\[22m([^\r\n]*)/g;
+export const PROMPT_HEADER = /\x1b\[36m\?\x1b\[39m \x1b\[1m((?:[^\x1b]|\x1b\[(?!22m)[0-9;]*m)+?)\x1b\[22m([^\r\n]*)/g;
 
 export function questionOf(group) {
   return strip(group).split(/[\r\n]+/)[0].trim();
