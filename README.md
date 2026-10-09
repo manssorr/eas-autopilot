@@ -5,6 +5,8 @@ routine prompts, shows live progress, and stops only when a decision is really y
 recorded, and a recorded run can be turned into a new automation by an agent, then checked by
 replaying it.
 
+**Direction:** an agent drives the tool and the human steps in only for secrets and real decisions; new scenarios are learned and can be shared upstream without personal details. See [docs/agentic-model.md](docs/agentic-model.md).
+
 ```
   📦 eas-ios-adhoc run · eas-autopilot 1.0.0
   main @ 1a2b3c4 · eas-cli 24.7.0
