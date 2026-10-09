@@ -14,7 +14,7 @@ function answerBytes(then) {
   return null;
 }
 
-export async function checkFlow(flow, runDirs) {
+export async function checkFlow(flow, runDirs, overrides = {}) {
   const problems = validateFlow(flow);
   if (problems.length) return { green: false, problems, runs: [] };
   const scratch = mkdtempSync(join(tmpdir(), "eas-autopilot-check-"));
@@ -38,7 +38,7 @@ export async function checkFlow(flow, runDirs) {
       ask: () => child.peekExpected() ?? "[secret]\r",
     });
     const recorder = createRecorder(join(scratch, String(runs.length)), { id: "check" });
-    const outcome = await run({ flow, params: header.params ?? {}, child, presenter, recorder, memory: createMemory(join(scratch, "memory.json")) });
+    const outcome = await run({ flow, params: { ...(header.params ?? {}), ...overrides }, child, presenter, recorder, memory: createMemory(join(scratch, "memory.json")) });
     recorder.close({});
     const unknown = readRecording(join(scratch, String(runs.length))).filter(f => f.name === "unknown-prompt").map(f => f.q);
     runs.push({ dir, divergence: outcome.divergence?.message ?? null, unknown, asked: presenter.log.filter(e => e.ask).map(e => e.ask) });
