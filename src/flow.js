@@ -76,13 +76,13 @@ function validateAction(action, where, problems) {
   }
 }
 
-export function interpolate(template, vars) {
+export function interpolate(template, vars, format = text => text) {
   return String(template).replace(/\{([\w.]+)\}/g, (_, name) => {
     const [base, prop] = name.split(".");
     const value = vars[base];
     if (prop === "length") return Array.isArray(value) ? String(value.length) : value ? "1" : "0";
-    if (Array.isArray(value)) return value.join(", ");
-    return value === undefined || value === null ? "" : String(value);
+    if (Array.isArray(value)) return format(value.join(", "));
+    return value === undefined || value === null ? "" : format(String(value));
   });
 }
 

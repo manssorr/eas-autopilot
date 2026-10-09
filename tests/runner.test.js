@@ -305,3 +305,37 @@ test("menu action walks an arrow-key list; replay collapses the human's wanderin
     "picking a different item must diverge",
   );
 });
+
+test("menu parameter values are matched literally, not as a regex", async () => {
+  const listeners = [];
+  const sent = [];
+  let resolveExit;
+  const exited = new Promise(resolve => (resolveExit = resolve));
+  const emit = data => listeners.forEach(fn => fn(data));
+  const menuFlow = {
+    flow: 1,
+    id: "escape-test",
+    command: ["x"],
+    params: { profile: { default: "preview.1" } },
+    rules: [{ id: "profile", on: { prompt: "^Which profile\\?" }, do: { menu: "^{profile}$" } }],
+  };
+  const child = {
+    write: data => {
+      sent.push(data);
+      if (data === "\r") setTimeout(() => resolveExit({ code: 0 }), 50);
+    },
+    onData: fn => listeners.push(fn),
+    settled: async () => {},
+    pause() {}, resume() {}, interrupt() {}, kill() {},
+    wait: () => exited,
+  };
+  const recorder = createRecorder(join(mockEnv().work, "escape"), { id: "escape" });
+  const running = run({ flow: menuFlow, child, presenter: headlessPresenter({ ask: () => "\r" }), recorder, memory: createMemory(join(mockEnv().work, "m.json")) });
+  emit(
+    "\x1b[36m?\x1b[39m \x1b[1mWhich profile?\x1b[22m \x1b[90m›\x1b[39m \x1b[90m- Use arrow-keys.\x1b[39m\r\n" +
+      "\x1b[36m❯\x1b[39m   previewX1\r\n    preview.1\r\n",
+  );
+  await running;
+  recorder.close({});
+  assert.deepEqual(sent, ["\x1b[B", "\r"]);
+});

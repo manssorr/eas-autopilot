@@ -224,7 +224,7 @@ export async function run({ flow, params = {}, child, presenter, recorder, memor
     const path = Array.isArray(spec) ? spec : [spec];
     const used = menuUses.get(rule) ?? 0;
     menuUses.set(rule, used + 1);
-    const pick = interpolate(path[Math.min(used, path.length - 1)], vars);
+    const pick = interpolate(path[Math.min(used, path.length - 1)], vars, escapeRegExp);
     await child.settled(300);
     const from = plain.lastIndexOf(prompt.q);
     const lines = plain.slice(Math.max(from, prompt.plainStart)).split(/[\r\n]+/).slice(1);
