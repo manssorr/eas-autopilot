@@ -281,7 +281,7 @@ function commandConfig() {
   if (!autoAccept.length) return process.stdout.write("no autoAccept rules\n");
   for (const rule of autoAccept) {
     const when = [`dir ${rule.when.dir}`, rule.when.expoAccount ? `expoAccount ${rule.when.expoAccount}` : null].filter(Boolean).join(", ");
-    process.stdout.write(`autoAccept: when ${when} -> Apple ID ${rule.appleId}, ${rule.trust === false ? "no trust" : "trust 3 days"}\n`);
+    process.stdout.write(`autoAccept: when ${when} -> Apple ID ${rule.appleId}, ${rule.trust === false ? "no trust" : "trust 3 days"}, startBuild ${rule.startBuild === true ? "yes" : "no"}\n`);
   }
 }
 

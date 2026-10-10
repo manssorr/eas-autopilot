@@ -116,6 +116,7 @@ export function terminalPresenter({ stdout = process.stdout, stdin = process.std
       line(`  \x1b[32m✔\x1b[0m ${text} \x1b[2m${formatDuration(now - mark)}\x1b[0m`);
       mark = now;
     },
+    show: ({ tone, icon, title, body }) => card({ tone, icon, title, body }),
     warn: text => {
       line(`  \x1b[33m⚠\x1b[0m ${text}`);
       mark = Date.now();
@@ -209,6 +210,7 @@ export function passthroughPresenter({ stdout = process.stdout, stdin = process.
     sub: () => {},
     done: () => {},
     warn: () => {},
+    show: () => {},
     choose: async () => "",
     ask: async (_, answered) => answered(),
     close: once(() => input.close()),
@@ -228,6 +230,7 @@ export function headlessPresenter({ choose = () => "", ask = () => null } = {}) 
     sub: () => {},
     done: text => log.push({ done: text }),
     warn: text => log.push({ warn: text }),
+    show: card => log.push({ show: card.title, body: card.body }),
     choose: async card => {
       log.push({ choose: card.title });
       return choose(card);

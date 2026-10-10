@@ -68,9 +68,26 @@ test("auto-accept rule for another Apple ID: the human is asked as today", async
   assert.deepEqual(presenter.log.filter(e => e.choose).map(e => e.choose), ["Use this Apple ID?", "Ready to build"]);
 });
 
-test("auto-accept never answers Start the build", async () => {
+test("auto-accept without startBuild never answers Start the build", async () => {
   const { presenter } = await runMock({ auto: { appleId: "tester@example.com", trust: true }, choose: pick({ "Ready to build": "y" }) });
   assert.ok(presenter.log.some(e => e.choose === "Ready to build"));
+});
+
+test("startBuild rule shows the summary, starts the build and asks nothing", async () => {
+  const { presenter, outcome, mock } = await runMock({ auto: { appleId: "tester@example.com", trust: true, startBuild: true }, params: { profile: "production" }, choose: () => assert.fail("asked") });
+  assert.equal(outcome.exit, 0);
+  assert.equal(outcome.result, "queued");
+  assert.match(mock.read(), /^uploaded$/m);
+  assert.deepEqual(presenter.log.filter(e => e.choose), []);
+  const shown = presenter.log.find(e => e.show === "Ready to build");
+  assert.ok(shown && shown.body.some(l => /production/.test(l)) && shown.body.some(l => /main @ test/.test(l)));
+  assert.ok(presenter.log.some(e => e.done === "🧾 Build started by rule (profile production, main @ test)"));
+});
+
+test("startBuild with a different Apple ID approved by hand: the build is asked, not started", async () => {
+  const { presenter } = await runMock({ auto: { appleId: "someone@example.com", trust: true, startBuild: true }, choose: pick({ "Use this Apple ID?": "y", "Ready to build": "y" }) });
+  assert.deepEqual(presenter.log.filter(e => e.choose).map(e => e.choose), ["Use this Apple ID?", "Ready to build"]);
+  assert.ok(!presenter.log.some(e => e.show || /Build started by rule/.test(e.done ?? "")));
 });
 
 test("a custom Flow cannot auto-answer the build confirmation or a secret prompt", async () => {
@@ -81,6 +98,16 @@ test("a custom Flow cannot auto-answer the build confirmation or a secret prompt
   const build = await runMock({ flow: custom, auto: rule, choose: pick({ "Use this Apple ID?": "y", "Ready to build": "y" }) });
   assert.ok(build.presenter.log.some(e => e.choose === "Ready to build"));
   assert.ok(!build.presenter.log.some(e => e.done === "auto"));
+  const marked = JSON.parse(JSON.stringify(flow));
+  marked.rules.find(r => r.do?.choose?.title === "Ready to build").do.choose.start_build = "y";
+  const flowOnly = await runMock({ flow: marked, auto: rule, choose: pick({ "Use this Apple ID?": "y", "Ready to build": "y" }) });
+  assert.ok(flowOnly.presenter.log.some(e => e.choose === "Ready to build"));
+  const other = JSON.parse(JSON.stringify(flow));
+  const step = other.rules.find(r => r.do?.choose?.title === "Ready to build");
+  step.do.choose.start_build = "y";
+  step.do.choose.title = "Some other choice";
+  const renamed = await runMock({ flow: other, auto: { ...rule, startBuild: true }, choose: pick({ "Some other choice": "y" }) });
+  assert.ok(renamed.presenter.log.some(e => e.choose === "Some other choice"));
 
   const secret = JSON.parse(JSON.stringify(flow));
   const login = secret.rules.find(r => r.id === "apple-secret");

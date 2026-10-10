@@ -112,7 +112,7 @@ answer the "Use this Apple ID?" menu for you. The file lives outside the repo, s
 ```json
 {
   "autoAccept": [
-    { "when": { "dir": "/Users/you/work/acme", "expoAccount": "acme" }, "appleId": "you@example.com", "trust": true }
+    { "when": { "dir": "/Users/you/work/acme", "expoAccount": "acme" }, "appleId": "you@example.com", "trust": true, "startBuild": true }
   ]
 }
 ```
@@ -121,7 +121,10 @@ answer the "Use this Apple ID?" menu for you. The file lives outside the repo, s
   it is checked against `eas whoami`, and ignored when eas-cli does not report one. The first matching rule wins.
 - When the offered Apple ID equals `appleId`, the tool picks "Use it, trust for 3 days" (or "Use it" with
   `"trust": false`) and prints `🍏 Apple ID auto-accepted by rule`. A different Apple ID is asked as usual.
-- Passwords, 2FA codes, and "Start the build" are never auto-answered.
+- `startBuild` (optional, default off): when `true`, the matching rule also answers "Ready to build" with
+  "Start the build". The full summary (profile, source, devices) is still printed first, then
+  `🧾 Build started by rule (profile <p>, <source>)`. Only this field starts a build; a Flow cannot.
+- Passwords, 2FA codes, and unknown prompts are never auto-answered. "Start the build" is asked unless `startBuild` is `true`.
 - `eas-autopilot config` prints the resolved path and the rules.
 
 ## Recordings and history

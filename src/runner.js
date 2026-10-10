@@ -263,6 +263,19 @@ export async function run({ flow, params = {}, child, presenter, recorder, memor
       step(interpolate(spec.auto.show, vars));
       return;
     }
+    // The build confirmation is auto-started only by a local rule with startBuild true AND a flow step marked "start_build"; show the full summary first.
+    // Only the pausing "Ready to build" step, only with no prompt active or waiting, and only when the Apple ID EAS used this run is the rule's.
+    const sameAppleId = typeof vars.email === "string" && typeof auto?.appleId === "string" && vars.email.toLowerCase() === auto.appleId.toLowerCase();
+    const startKey = auto?.startBuild === true && spec.start_build && spec.pause && title === "Ready to build" && prompt === undefined && !active && !pending && sameAppleId && !secrets.some(regex => regex.test(title)) ? spec.start_build : null;
+    const startOption = startKey && spec.options.find(o => o.key === startKey);
+    if (startOption) {
+      presenter.show({ tone: spec.tone ?? "info", icon: spec.icon ?? "", title, body: renderLines(spec.body, vars) });
+      recorder.mark("decision", { text: `${title}: ${startOption.label} (started by rule)` });
+      if (spec.pause && !startOption.then?.exit) child.resume();
+      await perform(startOption.then ?? "continue", rule, prompt);
+      step(`🧾 Build started by rule (profile ${vars.profile}, ${vars.git || "source unknown"})`);
+      return;
+    }
     if (memoryKey && memory?.trustedUntil(memoryKey)) {
       const hours = Math.round((memory.trustedUntil(memoryKey) - Date.now()) / 3600000);
       const option = spec.options.find(o => o.key === remember.then);

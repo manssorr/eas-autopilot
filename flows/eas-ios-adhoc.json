@@ -359,6 +359,7 @@
           "pause": true,
           "icon": "🧾",
           "title": "Ready to build",
+          "start_build": "y",
           "body": [
             "\u001b[2mEAS is paused. Nothing is uploaded and no build exists yet.\u001b[0m",
             "",
