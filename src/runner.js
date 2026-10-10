@@ -252,8 +252,9 @@ export async function run({ flow, params = {}, child, presenter, recorder, memor
     const title = interpolate(spec.title, vars);
     const remember = spec.remember;
     const memoryKey = remember ? interpolate(remember.key, vars) : null;
-    // A local rule may answer this choice, never the build confirmation: only specs that opt in via "auto".
-    const autoKey = spec.auto && auto?.[spec.auto.field]?.toLowerCase() === interpolate(spec.auto.value, vars).toLowerCase() ? (auto.trust === false ? spec.auto.plain : spec.auto.trust) : null;
+    // A local rule may answer only a prompt-triggered Apple ID choice that opts in via "auto": never a secret, never the build confirmation.
+    const autoAllowed = spec.auto?.field === "appleId" && prompt && rule?.on?.prompt && !spec.pause && !prompt.secret && !secrets.some(regex => regex.test(title));
+    const autoKey = autoAllowed && auto?.[spec.auto.field]?.toLowerCase() === interpolate(spec.auto.value, vars).toLowerCase() ? (auto.trust === false ? spec.auto.plain : spec.auto.trust) : null;
     if (autoKey) {
       const option = spec.options.find(o => o.key === autoKey);
       recorder.mark("decision", { text: `${title}: ${option.label} (auto-accepted by rule)` });
