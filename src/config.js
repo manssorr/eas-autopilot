@@ -19,6 +19,7 @@ export function loadConfig(env = process.env, warn = message => process.stderr.w
       const where = `autoAccept[${i}]`;
       if (typeof rule?.when?.dir !== "string" || !rule.when.dir.startsWith("/")) throw new Error(`${where}: when.dir must be an absolute path`);
       if (typeof rule.appleId !== "string" || !rule.appleId) throw new Error(`${where}: appleId is required`);
+      if (rule.startBuild !== undefined && typeof rule.startBuild !== "boolean") throw new Error(`${where}: startBuild must be true or false`);
     });
     return { path, autoAccept };
   } catch (error) {

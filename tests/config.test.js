@@ -24,7 +24,7 @@ test("configPath respects XDG_CONFIG_HOME", () => {
 test("loadConfig: a missing file is empty; bad JSON, null and bad rules warn once and give no rules", () => {
   const dir = tree();
   assert.deepEqual(loadConfig({ XDG_CONFIG_HOME: dir }, () => assert.fail("no warning")).autoAccept, []);
-  for (const text of ["{nope", "null", JSON.stringify({ autoAccept: [{ when: {}, appleId: "x@example.com" }] }), JSON.stringify({ autoAccept: "x" })]) {
+  for (const text of ["{nope", "null", JSON.stringify({ autoAccept: [{ when: {}, appleId: "x@example.com" }] }), JSON.stringify({ autoAccept: "x" }), JSON.stringify({ autoAccept: [{ when: { dir: "/x" }, appleId: "x@example.com", startBuild: "yes" }] })]) {
     const warnings = [];
     assert.deepEqual(loadConfig(configIn(dir, text), m => warnings.push(m)).autoAccept, []);
     assert.equal(warnings.length, 1, text);
