@@ -104,6 +104,26 @@ the result line), the Flow format, and the existing Flow. It writes a Flow and r
 reports `green`: the Flow must send the same keys the human sent at every prompt, and must hand
 secret prompts back to the human. The Flow format is in [docs/flow-format.md](docs/flow-format.md). What is covered today, compared with eas-cli and @expo/agent-cli, is in [docs/coverage.md](docs/coverage.md).
 
+## Auto-accept rules
+
+Rules in `~/.config/eas-autopilot/config.json` (or `$XDG_CONFIG_HOME/eas-autopilot/config.json`)
+answer the "Use this Apple ID?" menu for you. The file lives outside the repo, so the addresses stay local.
+
+```json
+{
+  "autoAccept": [
+    { "when": { "dir": "/Users/you/work/acme", "expoAccount": "acme" }, "appleId": "you@example.com", "trust": true }
+  ]
+}
+```
+
+- `dir`: matches when the run's `--dir` (resolved) is that folder or inside it. `expoAccount` is optional;
+  it is checked against `eas whoami`, and ignored when eas-cli does not report one. The first matching rule wins.
+- When the offered Apple ID equals `appleId`, the tool picks "Use it, trust for 3 days" (or "Use it" with
+  `"trust": false`) and prints `🍏 Apple ID auto-accepted by rule`. A different Apple ID is asked as usual.
+- Passwords, 2FA codes, and "Start the build" are never auto-answered.
+- `eas-autopilot config` prints the resolved path and the rules.
+
 ## Recordings and history
 
 Everything lives in `~/.local/state/eas-autopilot/` (override with `EAS_AUTOPILOT_STATE`):

@@ -7,7 +7,7 @@ const PROGRESS_BAR = /\|[■ ]+\|\s+(.+\.\.\.)$/;
 const DONE_LINE = /^✔\s+(.+)$/;
 const ANSWER_TIMEOUT_MS = 120000;
 
-export async function run({ flow, params = {}, child, presenter, recorder, memory, mode = "run" }) {
+export async function run({ flow, params = {}, child, presenter, recorder, memory, mode = "run", auto = null }) {
   const vars = { ...defaults(flow), ...params };
   const rules = flow?.rules ?? [];
   const secrets = [...DEFAULT_SECRETS, ...(flow?.secrets ?? [])].map(source => new RegExp(source, "i"));
@@ -252,6 +252,16 @@ export async function run({ flow, params = {}, child, presenter, recorder, memor
     const title = interpolate(spec.title, vars);
     const remember = spec.remember;
     const memoryKey = remember ? interpolate(remember.key, vars) : null;
+    // A local rule may answer this choice, never the build confirmation: only specs that opt in via "auto".
+    const autoKey = spec.auto && auto?.[spec.auto.field]?.toLowerCase() === interpolate(spec.auto.value, vars).toLowerCase() ? (auto.trust === false ? spec.auto.plain : spec.auto.trust) : null;
+    if (autoKey) {
+      const option = spec.options.find(o => o.key === autoKey);
+      recorder.mark("decision", { text: `${title}: ${option.label} (auto-accepted by rule)` });
+      if (memoryKey) memory?.approve(memoryKey, option.remember ? remember.days ?? 0 : 0);
+      await perform(option.then ?? "continue", rule, prompt);
+      step(interpolate(spec.auto.show, vars));
+      return;
+    }
     if (memoryKey && memory?.trustedUntil(memoryKey)) {
       const hours = Math.round((memory.trustedUntil(memoryKey) - Date.now()) / 3600000);
       const option = spec.options.find(o => o.key === remember.then);

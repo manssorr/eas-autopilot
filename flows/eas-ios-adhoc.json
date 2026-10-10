@@ -106,6 +106,13 @@
           "body": [
             "\u001b[1m{email}\u001b[0m"
           ],
+          "auto": {
+            "field": "appleId",
+            "value": "{email}",
+            "trust": "t",
+            "plain": "y",
+            "show": "🍏 Apple ID auto-accepted by rule"
+          },
           "remember": {
             "key": "apple-id:{email}",
             "days": 3,
