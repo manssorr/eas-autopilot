@@ -15,14 +15,14 @@ const flow = loadFlow(join(ROOT, "flows", "eas-ios-adhoc.json"));
 
 before(() => ensureMockDeps());
 
-async function runMock({ mockVars = {}, choose, ask, params = {}, mode = "run", memoryPath, presenter: given } = {}) {
+async function runMock({ mockVars = {}, choose, ask, params = {}, mode = "run", memoryPath, presenter: given, auto = null, flow: flowOverride = flow } = {}) {
   const mock = mockEnv(mockVars);
   const dir = join(mock.work, "run");
-  const recorder = createRecorder(dir, { id: "test", mode, flow: flow.id, command: MOCK_COMMAND });
+  const recorder = createRecorder(dir, { id: "test", mode, flow: flowOverride.id, command: MOCK_COMMAND });
   const presenter = given ?? headlessPresenter({ choose, ask });
   const memory = createMemory(memoryPath ?? join(mock.work, "memory.json"));
   const child = createPtyChild(MOCK_COMMAND, { cwd: mock.work, env: mock.env });
-  const outcome = await run({ flow, params: { udid: NEW_DEVICE, git: "main @ test", ...params }, child, presenter, recorder, memory, mode });
+  const outcome = await run({ flow: flowOverride, params: { udid: NEW_DEVICE, git: "main @ test", ...params }, child, presenter, recorder, memory, mode, auto });
   recorder.close({ exit: outcome.exit, result: outcome.result, child_code: outcome.childCode });
   return { outcome, mock, dir, presenter, frames: readRecording(dir) };
 }
@@ -45,6 +45,49 @@ test("trusted Apple ID is not asked again", async () => {
   assert.equal(outcome.exit, 0);
   assert.deepEqual(presenter.log.filter(e => e.choose).map(e => e.choose), ["Ready to build"]);
   assert.ok(presenter.log.some(e => /trusted, \d+h left/.test(e.done ?? "")));
+});
+
+test("auto-accept rule answers the matching Apple ID and trusts it", async () => {
+  const memoryPath = join(mockEnv().work, "memory.json");
+  const { presenter, outcome } = await runMock({ memoryPath, auto: { appleId: "Tester@Example.com", trust: true }, choose: pick({ "Ready to build": "y" }) });
+  assert.equal(outcome.exit, 0);
+  assert.deepEqual(presenter.log.filter(e => e.choose).map(e => e.choose), ["Ready to build"]);
+  assert.ok(presenter.log.some(e => e.done === "🍏 Apple ID auto-accepted by rule"));
+  assert.ok(createMemory(memoryPath).trustedUntil("apple-id:tester@example.com"));
+});
+
+test("auto-accept rule without trust picks plain Use it and remembers nothing", async () => {
+  const memoryPath = join(mockEnv().work, "memory.json");
+  const { presenter } = await runMock({ memoryPath, auto: { appleId: "tester@example.com", trust: false }, choose: pick({ "Ready to build": "y" }) });
+  assert.deepEqual(presenter.log.filter(e => e.choose).map(e => e.choose), ["Ready to build"]);
+  assert.equal(createMemory(memoryPath).trustedUntil("apple-id:tester@example.com"), 0);
+});
+
+test("auto-accept rule for another Apple ID: the human is asked as today", async () => {
+  const { presenter } = await runMock({ auto: { appleId: "someone@example.com", trust: true }, choose: pick({ "Use this Apple ID?": "y", "Ready to build": "y" }) });
+  assert.deepEqual(presenter.log.filter(e => e.choose).map(e => e.choose), ["Use this Apple ID?", "Ready to build"]);
+});
+
+test("auto-accept never answers Start the build", async () => {
+  const { presenter } = await runMock({ auto: { appleId: "tester@example.com", trust: true }, choose: pick({ "Ready to build": "y" }) });
+  assert.ok(presenter.log.some(e => e.choose === "Ready to build"));
+});
+
+test("a custom Flow cannot auto-answer the build confirmation or a secret prompt", async () => {
+  const rule = { appleId: "tester@example.com", trust: true };
+  const auto = { field: "appleId", value: "tester@example.com", trust: "y", plain: "y", show: "auto" };
+  const custom = JSON.parse(JSON.stringify(flow));
+  custom.rules.find(r => r.do?.choose?.title === "Ready to build").do.choose.auto = auto;
+  const build = await runMock({ flow: custom, auto: rule, choose: pick({ "Use this Apple ID?": "y", "Ready to build": "y" }) });
+  assert.ok(build.presenter.log.some(e => e.choose === "Ready to build"));
+  assert.ok(!build.presenter.log.some(e => e.done === "auto"));
+
+  const secret = JSON.parse(JSON.stringify(flow));
+  const login = secret.rules.find(r => r.id === "apple-secret");
+  login.do = { choose: { title: "Password", options: [{ key: "y", label: "Use it", then: { answer: "pw" } }], auto } };
+  const asked = await runMock({ flow: secret, auto: rule, mockVars: { EAS_MOCK_PASSWORD: "1" }, choose: pick({ "Use this Apple ID?": "y", Password: "y", "Ready to build": "y" }) });
+  assert.ok(asked.presenter.log.some(e => e.choose === "Password"));
+  assert.ok(!asked.presenter.log.some(e => e.done === "auto"));
 });
 
 test("Apple refuses the target device: stop before anything is uploaded", async () => {

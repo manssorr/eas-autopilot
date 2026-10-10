@@ -5,6 +5,7 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { checkFlow } from "../src/check.js";
+import { loadConfig, matchRule } from "../src/config.js";
 import { createPtyChild } from "../src/child.js";
 import { interpolate, loadFlow } from "../src/flow.js";
 import { agentPrompt } from "../src/learn.js";
@@ -46,12 +47,14 @@ Usage:
   eas-autopilot learn <run-id|latest> [--flow <id|file>] [--out <file>]
   eas-autopilot check <flow-file|id> [run-id…]
   eas-autopilot history [N]
+  eas-autopilot config
 
 run      run a command through a Flow: routine prompts answered, real decisions asked
 record   run the command untouched (plain EAS screen) and record every byte and key
 learn    print an agent prompt that turns a recorded run into a Flow
 check    replay recorded runs through a Flow and report divergences
 history  list recent runs
+config   print the config path and its auto-accept rules
 
 Default flow: eas-ios-adhoc. State and recordings: ${STATE}
 `;
@@ -102,6 +105,21 @@ function easCliVersion(dir, command) {
   } catch {
     return null;
   }
+}
+
+function expoAccount(dir) {
+  try {
+    return execFileSync("npx", ["eas-cli", "whoami"], { cwd: dir, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).split("\n")[0].trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+function autoRule(dir) {
+  const { autoAccept } = loadConfig();
+  const byDir = autoAccept.filter(rule => matchRule([{ ...rule, when: { dir: rule.when.dir } }], { dir }));
+  const account = byDir.some(rule => rule.when.expoAccount) ? expoAccount(dir) : null;
+  return matchRule(autoAccept, { dir, account });
 }
 
 function finishRun(dir) {
@@ -155,7 +173,7 @@ async function commandRun(args) {
   presenter.done("🧹 Working tree clean");
   const child = createPtyChild(ctx.command, { cwd: ctx.dir, cols: ctx.cols, rows: ctx.rows });
   cleanups.push(() => child.kill());
-  const outcome = await run({ flow: ctx.flow, params: ctx.params, child, presenter, recorder, memory: createMemory(join(STATE, "memory.json")), mode: "run" });
+  const outcome = await run({ flow: ctx.flow, params: ctx.params, child, presenter, recorder, memory: createMemory(join(STATE, "memory.json")), mode: "run", auto: autoRule(ctx.dir) });
   const end = { exit: outcome.exit, result: outcome.result, child_code: outcome.childCode, build_url: outcome.vars.build_url ?? null };
 
   if (outcome.exit === 0 && outcome.vars.build_url && (args.wait || args.udid) && !args["no-follow"]) {
@@ -257,6 +275,16 @@ async function commandCheck(args) {
   process.exit(report.green && !report.problems.length ? 0 : 1);
 }
 
+function commandConfig() {
+  const { path, autoAccept } = loadConfig();
+  process.stdout.write(`${path}${existsSync(path) ? "" : " (not found)"}\n`);
+  if (!autoAccept.length) return process.stdout.write("no autoAccept rules\n");
+  for (const rule of autoAccept) {
+    const when = [`dir ${rule.when.dir}`, rule.when.expoAccount ? `expoAccount ${rule.when.expoAccount}` : null].filter(Boolean).join(", ");
+    process.stdout.write(`autoAccept: when ${when} -> Apple ID ${rule.appleId}, ${rule.trust === false ? "no trust" : "trust 3 days"}\n`);
+  }
+}
+
 function commandHistory(args) {
   const file = join(STATE, "runs.jsonl");
   if (!existsSync(file)) return process.stdout.write("No runs yet.\n");
@@ -277,7 +305,7 @@ if (args.version) {
   process.exit(0);
 }
 mkdirSync(RUNS, { recursive: true, mode: 0o700 });
-const commands = { run: commandRun, record: commandRecord, learn: commandLearn, check: commandCheck, history: commandHistory };
+const commands = { run: commandRun, record: commandRecord, learn: commandLearn, check: commandCheck, history: commandHistory, config: commandConfig };
 const name = commands[args._[0]] ? args._[0] : "run";
 Promise.resolve(commands[name](args)).catch(error => {
   cleanup();

@@ -54,6 +54,10 @@ A Flow is one JSON file. Rules are tried in order; the first rule whose `on` mat
   option exits. At most one rule may pause, and it must be an `output` rule.
 - `remember`: an option with `"remember": true` stores the choice for `days`; while stored, the
   runner takes option `then` without asking.
+- `auto`: `{"field": "appleId", "value": "{email}", "trust": "t", "plain": "y", "show": "line"}` lets a
+  local [auto-accept rule](../README.md#auto-accept-rules) answer this menu when the rule's `field`
+  equals `value`: option `trust` (or `plain` when the rule has `"trust": false`). Only menus that
+  opt in are ever auto-answered.
 
 ## Values
 
