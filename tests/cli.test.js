@@ -67,6 +67,21 @@ test("run: terminal UI asks twice, answers the rest, prints the install link", a
   assert.equal(s.mock.read().match(/selected \S+ 20\/20/g).length, 3);
 });
 
+test("config prints the path and the rules, and a matching rule skips the Apple ID card", async () => {
+  const s = setup();
+  const cfgHome = join(s.mock.work, "xdg");
+  mkdirSync(join(cfgHome, "eas-autopilot"), { recursive: true });
+  writeFileSync(join(cfgHome, "eas-autopilot", "config.json"), JSON.stringify({ autoAccept: [{ when: { dir: s.mock.work }, appleId: "tester@example.com", trust: true }] }));
+  const env = { ...s.env, XDG_CONFIG_HOME: cfgHome };
+  const out = execFileSync("node", [CLI, "config"], { env, encoding: "utf8" });
+  assert.match(out, /xdg\/eas-autopilot\/config\.json/);
+  assert.match(out, /tester@example\.com/);
+  const { code, screen } = await drive(["run", "--dir", s.app, "--flow", s.flowPath, "--udid", NEW_DEVICE, "--no-follow"], env, [["Ready to build", "\r", "card"]]);
+  assert.equal(code, 0, screen.slice(-800));
+  assert.match(screen, /Apple ID auto-accepted by rule/);
+  assert.doesNotMatch(screen, /Use this Apple ID\?/);
+});
+
 test("record, learn, check: a human run becomes a checked flow", async () => {
   const s = setup();
   const rec = await drive(["record", "--dir", s.app, "--flow", s.flowPath], s.env, [
